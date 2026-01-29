@@ -1,0 +1,65 @@
+{
+  "name": "auto-dev-launcher-gui",
+  "version": "1.0.0",
+  "description": "自动开发服务器启动工具 - GUI 版本",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "vite",
+    "dev:electron": "electron .",
+    "build:renderer": "vite build",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:preload": "tsc src/main/preload.ts --outDir dist --module commonjs --target es2020 --skipLibCheck --rootDir src",
+    "build": "pnpm run build:renderer && pnpm run build:main && pnpm run build:preload",
+    "start": "electron .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "pnpm run build && electron-builder",
+    "package:win": "pnpm run build && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.autodevlauncher.gui",
+    "productName": "自动开发服务器启动工具",
+    "directories": {
+      "output": "release-final",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "keywords": ["electron", "dev-server", "launcher", "gui"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.10",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "electron": "^40.0.0",
+    "electron-builder": "^26.4.0",
+    "fast-check": "^4.5.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
+  }
+}

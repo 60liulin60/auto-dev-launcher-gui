@@ -2,8 +2,8 @@
 
 > 一个智能化的开发服务器管理工具，让项目启动变得简单高效
 
-[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/yourusername/auto-dev-launcher)
-[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://github.com/yourusername/auto-dev-launcher)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/60liulin60/auto-dev-launcher-gui)
+[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://github.com/60liulin60/auto-dev-launcher-gui)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
@@ -425,7 +425,7 @@ C:\Users\{用户名}\AppData\Roaming\auto-dev-launcher-gui\
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourusername/auto-dev-launcher-gui.git
+git clone https://github.com/60liulin60/auto-dev-launcher-gui.git
 cd auto-dev-launcher-gui
 
 # 安装依赖
@@ -730,6 +730,6 @@ SOFTWARE.
 
 Made with ❤️ by Development Team
 
-[下载](https://github.com/yourusername/auto-dev-launcher/releases) · [文档](./文档索引.md) · [反馈](https://github.com/yourusername/auto-dev-launcher/issues)
+[下载](https://github.com/60liulin60/auto-dev-launcher-gui/releases) · [文档](./文档索引.md) · [反馈](https://github.com/60liulin60/auto-dev-launcher-gui/issues)
 
 </div>

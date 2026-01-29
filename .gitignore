@@ -4,7 +4,7 @@ node_modules/
 .pnp.js
 
 release-final/win-unpacked
-
+release/
 # Testing
 coverage/
 *.log
@@ -15,6 +15,7 @@ build/
 
 # Release files (too large for GitHub)
 release-final/
+release/
 
 # Environment
 .env

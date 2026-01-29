@@ -18,6 +18,9 @@
     "build:main": "tsc -p tsconfig.main.json",
     "build:preload": "tsc src/main/preload.ts --outDir dist --module commonjs --target es2020 --skipLibCheck --rootDir src",
     "build": "pnpm run build:renderer && pnpm run build:main && pnpm run build:preload",
+    "clean": "node scripts/clean.js",
+    "prepackage": "npm run clean",
+    "prepackage:win": "npm run clean",
     "start": "electron .",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -51,7 +54,10 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     }
   },
   "keywords": [

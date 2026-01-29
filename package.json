@@ -3,6 +3,14 @@
   "version": "1.0.0",
   "description": "自动开发服务器启动工具 - GUI 版本",
   "main": "dist/main/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/60liulin60/auto-dev-launcher-gui.git"
+  },
+  "bugs": {
+    "url": "https://github.com/60liulin60/auto-dev-launcher-gui/issues"
+  },
+  "homepage": "https://github.com/60liulin60/auto-dev-launcher-gui#readme",
   "scripts": {
     "dev": "vite",
     "dev:electron": "electron .",

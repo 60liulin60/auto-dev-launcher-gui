@@ -1,6 +1,6 @@
 {
   "name": "auto-dev-launcher-gui",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "自动开发服务器启动工具 - GUI 版本",
   "main": "dist/main/index.js",
   "repository": {
@@ -28,7 +28,7 @@
     "appId": "com.autodevlauncher.gui",
     "productName": "自动开发服务器启动工具",
     "directories": {
-      "output": "release-final",
+      "output": "release",
       "buildResources": "build"
     },
     "files": [
@@ -36,10 +36,13 @@
       "package.json"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "signAndEditExecutable": false
@@ -51,7 +54,12 @@
       "createStartMenuShortcut": true
     }
   },
-  "keywords": ["electron", "dev-server", "launcher", "gui"],
+  "keywords": [
+    "electron",
+    "dev-server",
+    "launcher",
+    "gui"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {

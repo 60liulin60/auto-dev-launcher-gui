@@ -20,11 +20,18 @@ async function createWindow() {
   // 加载保存的窗口尺寸
   const settings = await storage.loadSettings()
   
+  // 设置图标路径 - 使用绝对路径
+  const iconPath = path.join(__dirname, '../../build/icon.ico')
+  
+  console.log('Icon path:', iconPath)
+  console.log('Icon exists:', require('fs').existsSync(iconPath))
+  
   mainWindow = new BrowserWindow({
     width: settings.windowBounds.width || DEFAULT_WINDOW_BOUNDS.width,
     height: settings.windowBounds.height || DEFAULT_WINDOW_BOUNDS.height,
     x: settings.windowBounds.x,
     y: settings.windowBounds.y,
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,

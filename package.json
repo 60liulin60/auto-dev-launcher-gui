@@ -1,6 +1,6 @@
 {
   "name": "auto-dev-launcher-gui",
-  "version": "1.0.1",
+  "version": "1.0.4",
   "description": "自动开发服务器启动工具 - GUI 版本",
   "main": "dist/main/index.js",
   "repository": {
@@ -19,17 +19,20 @@
     "build:preload": "tsc src/main/preload.ts --outDir dist --module commonjs --target es2020 --skipLibCheck --rootDir src",
     "build": "pnpm run build:renderer && pnpm run build:main && pnpm run build:preload",
     "clean": "node scripts/clean.js",
+    "verify:icon": "node scripts/verify-icon.js",
     "prepackage": "npm run clean",
     "prepackage:win": "npm run clean",
     "start": "electron .",
     "test": "vitest run",
     "test:watch": "vitest",
     "package": "pnpm run build && electron-builder",
-    "package:win": "pnpm run build && electron-builder --win"
+    "package:win": "pnpm run verify:icon && pnpm run build && electron-builder --win",
+    "package:win:nosign": "pnpm run verify:icon && pnpm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win"
   },
   "build": {
     "appId": "com.autodevlauncher.gui",
     "productName": "自动开发服务器启动工具",
+    "icon": "build/icon.ico",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -37,6 +40,12 @@
     "files": [
       "dist/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "build/icon.ico"
+      }
     ],
     "win": {
       "icon": "build/icon.ico",
@@ -48,16 +57,17 @@
           ]
         }
       ],
-      "signAndEditExecutable": false
+      "verifyUpdateCodeSignature": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
+      "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico"
+      "installerHeaderIcon": "build/icon.ico",
+      "include": "build/installer.nsh"
     }
   },
   "keywords": [
@@ -80,6 +90,8 @@
     "electron": "^40.0.0",
     "electron-builder": "^26.4.0",
     "fast-check": "^4.5.3",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.34.5",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"

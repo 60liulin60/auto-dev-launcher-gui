@@ -20,9 +20,18 @@ async function createWindow() {
   // 加载保存的窗口尺寸
   const settings = await storage.loadSettings()
   
-  // 设置图标路径 - 使用绝对路径
-  const iconPath = path.join(__dirname, '../../build/icon.ico')
+  // 设置图标路径 - Windows 使用 ICO 格式以获得最佳兼容性
+  let iconPath: string
   
+  if (app.isPackaged) {
+    // 生产环境：图标在 resources 目录下
+    iconPath = path.join(process.resourcesPath, 'build', 'icon.ico')
+  } else {
+    // 开发环境：图标在项目根目录的 build 文件夹
+    iconPath = path.join(__dirname, '../../build/icon.ico')
+  }
+  
+  console.log('Environment:', app.isPackaged ? 'Production' : 'Development')
   console.log('Icon path:', iconPath)
   console.log('Icon exists:', require('fs').existsSync(iconPath))
   
@@ -61,7 +70,14 @@ async function createWindow() {
 
   // 窗口准备好后显示
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show()
+    if (mainWindow) {
+      mainWindow.show()
+      
+      // 在 Windows 上，确保任务栏图标正确显示
+      if (process.platform === 'win32') {
+        mainWindow.setIcon(iconPath)
+      }
+    }
   })
 
   // 保存窗口尺寸
@@ -98,6 +114,12 @@ async function createWindow() {
  * 应用准备就绪
  */
 app.whenReady().then(async () => {
+  // 设置 Windows 应用程序用户模型 ID
+  // 这对于任务栏图标显示很重要
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.autodevlauncher.gui');
+  }
+  
   await createWindow()
 
   app.on('activate', () => {

@@ -11,7 +11,12 @@ coverage/
 
 # Production
 dist/
-build/
+
+# Build directory (but keep icon files)
+build/*
+!build/icon.png
+!build/icon.ico
+!build/ICON_INSTRUCTIONS.md
 
 # Release files (too large for GitHub)
 release-final/

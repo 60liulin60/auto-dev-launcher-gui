@@ -1,56 +1,119 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useCallback, useState, useRef } from 'react'
 import './App.css'
-
-interface ServerState {
-  status: 'idle' | 'starting' | 'running' | 'stopped' | 'error'
-  output: string[]
-}
+import { ServerStatus } from './types'
+import { useApp } from './contexts/AppContext'
+import { ProjectHistoryEntry } from '../shared/types'
+import Header from './components/Header'
+import ProjectList from './components/ProjectList'
+import OutputConsole from './components/OutputConsole'
 
 function App() {
-  const [projects, setProjects] = useState<any[]>([])
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
-  const [serverStates, setServerStates] = useState<Map<string, ServerState>>(new Map())
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const {
+    state,
+    dispatch,
+    loadProjects,
+    setSelectedFolder,
+    setSelectedProject,
+    updateServerState,
+    getServerState
+  } = useApp()
 
-  // 加载项目历史
+  const [isLaunching, setIsLaunching] = useState(false)
+  
+  // 使用 ref 来跟踪正在停止的项目,避免依赖问题
+  const stoppingProjectsRef = useRef<Set<string>>(new Set())
+
+  // 创建 state ref 以在事件监听器中访问最新状态
+  const stateRef = useRef(state)
+  
+  // 更新 state ref
   useEffect(() => {
-    loadHistory()
-    
-    // 监听服务器输出
-    window.electronAPI.onServerOutput((projectId: string, output: string) => {
-      setServerStates(prev => {
-        const newMap = new Map(prev)
-        const state = newMap.get(projectId) || { status: 'running', output: [] }
-        state.output.push(output)
-        // 只保留最后 100 行
-        if (state.output.length > 100) {
-          state.output = state.output.slice(-100)
-        }
-        newMap.set(projectId, state)
-        return newMap
-      })
-    })
-    
-    // 监听状态变化
-    window.electronAPI.onServerStatusChange((projectId: string, status: any) => {
-      setServerStates(prev => {
-        const newMap = new Map(prev)
-        const state = newMap.get(projectId) || { status: 'idle', output: [] }
-        state.status = status
-        newMap.set(projectId, state)
-        return newMap
-      })
-    })
-  }, [])
+    stateRef.current = state
+  }, [state])
 
-  const loadHistory = async () => {
+  // 创建 dispatch ref
+  const dispatchRef = useRef(dispatch)
+
+  // 更新 dispatch ref
+  useEffect(() => {
+    dispatchRef.current = dispatch
+  }, [dispatch])
+
+  // 使用 ref 来跟踪监听器是否已设置
+  const isListenerSetupRef = useRef(false)
+
+  // 添加标志防止重复注册监听器
+  const listenersRegistered = useRef(false)
+
+  // 加载历史记录
+  const loadHistory = useCallback(async () => {
     try {
       const history = await window.electronAPI.loadHistory()
-      setProjects(history)
+      loadProjects(history)
     } catch (error) {
       console.error('Failed to load history:', error)
     }
-  }
+  }, [loadProjects])
+
+  // 初始化应用 - 只执行一次
+  useEffect(() => {
+    // 检查监听器是否已经设置
+    if (isListenerSetupRef.current) {
+      console.log('[App] Listeners already setup, skipping')
+      return
+    }
+    
+    // 设置事件监听器 - 使用函数式更新避免闭包问题
+    const handleServerOutput = (projectId: string, output: string) => {
+      console.log('[App] Received server output:', projectId, output.substring(0, 50))
+      
+      // 使用函数式更新,确保获取最新状态
+      dispatchRef.current({
+        type: 'UPDATE_SERVER_STATE_FUNCTIONAL',
+        payload: {
+          projectId,
+          updater: (currentState) => {
+            console.log('[App] Current state:', currentState.status, 'outputs:', currentState.output.length)
+            const newState = {
+              ...currentState,
+              status: currentState.status === 'idle' ? 'running' as ServerStatus : currentState.status,
+              output: [...currentState.output, output].slice(-100)
+            }
+            console.log('[App] New state:', newState.status, 'outputs:', newState.output.length)
+            return newState
+          }
+        }
+      })
+    }
+
+    const handleServerStatusChange = (projectId: string, status: string) => {
+      console.log('[App] Received status change:', projectId, status)
+      
+      dispatchRef.current({
+        type: 'UPDATE_SERVER_STATE_FUNCTIONAL',
+        payload: {
+          projectId,
+          updater: (currentState) => ({
+            ...currentState,
+            status: status as ServerStatus
+          })
+        }
+      })
+    }
+
+    // 注册监听器
+    console.log('[App] Setting up IPC listeners')
+    window.electronAPI.onServerOutput(handleServerOutput)
+    window.electronAPI.onServerStatusChange(handleServerStatusChange)
+    
+    // 标记监听器已设置
+    isListenerSetupRef.current = true
+
+    // 加载历史记录
+    loadHistory()
+
+    // 注意：这里不设置清理函数，因为electron的IPC监听器不支持清理
+  }, [loadHistory]) // 移除 state.serverStates 依赖，避免重复注册监听器
 
   // 选择文件夹
   const handleSelectFolder = async () => {
@@ -87,47 +150,101 @@ function App() {
   }
 
   // 启动项目
-  const handleLaunchProject = async (project: any) => {
-    try {
-      // 初始化状态
-      setServerStates(prev => {
-        const newMap = new Map(prev)
-        newMap.set(project.id, { status: 'starting', output: [] })
-        return newMap
-      })
-      
-      await window.electronAPI.startServer(project.id, project.path, project.config)
-      setSelectedProjectId(project.id)
-    } catch (error: any) {
-      console.error('Failed to start server:', error)
-      alert(`启动失败: ${error.message || error}`)
-      
-      setServerStates(prev => {
-        const newMap = new Map(prev)
-        newMap.set(project.id, { status: 'error', output: [`错误: ${error.message || error}`] })
-        return newMap
-      })
+  const handleLaunchProject = useCallback(async (project: ProjectHistoryEntry) => {
+    console.log('[App] handleLaunchProject called:', project)
+    
+    // 清理可能残留的停止标记
+    if (stoppingProjectsRef.current.has(project.id)) {
+      console.log('[App] Cleaning up stale stopping flag for:', project.id)
+      stoppingProjectsRef.current.delete(project.id)
     }
-  }
+    
+    // 防止重复启动
+    if (isLaunching) {
+      console.log('[App] Already launching, skipping')
+      return
+    }
+
+    setIsLaunching(true)
+
+    try {
+      console.log('[App] Initializing server state for:', project.id)
+      // 初始化状态 - 确保状态被正确设置
+      const initialState = { status: 'starting' as ServerStatus, output: [] }
+      console.log('[App] Setting initial state:', initialState)
+      updateServerState(project.id, initialState)
+      
+      // 验证状态是否被设置
+      setTimeout(() => {
+        const verifyState = getServerState(project.id)
+        console.log('[App] Verified state after init:', verifyState)
+      }, 100)
+
+      console.log('[App] Calling startServer API')
+      await window.electronAPI.startServer(project.id, project.path, project.config)
+      console.log('[App] Server started successfully')
+      setSelectedProject(project.id)
+    } catch (error: any) {
+      console.error('[App] Failed to start server:', error)
+      alert(`启动失败: ${error.message || error}`)
+
+      updateServerState(project.id, {
+        status: 'error',
+        output: [`错误: ${error.message || error}`]
+      })
+    } finally {
+      setIsLaunching(false)
+    }
+  }, [isLaunching, updateServerState, setSelectedProject, getServerState])
 
   // 停止项目
-  const handleStopProject = async (projectId: string) => {
-    try {
-      await window.electronAPI.stopServer(projectId)
-      setServerStates(prev => {
-        const newMap = new Map(prev)
-        const state = newMap.get(projectId)
-        if (state) {
-          state.status = 'stopped'
-          newMap.set(projectId, state)
-        }
-        return newMap
-      })
-    } catch (error: any) {
-      console.error('Failed to stop server:', error)
-      alert(`停止失败: ${error.message || error}`)
+  const handleStopProject = useCallback((projectId: string) => {
+    console.log('[App] handleStopProject called:', projectId)
+    console.log('[App] Current stopping projects:', Array.from(stoppingProjectsRef.current))
+    
+    // 防止重复点击
+    if (stoppingProjectsRef.current.has(projectId)) {
+      console.log('[App] Already stopping this project, skipping')
+      return
     }
-  }
+    
+    // 标记为正在停止
+    stoppingProjectsRef.current.add(projectId)
+    console.log('[App] Added to stopping projects:', projectId)
+    
+    // 立即更新 UI 状态为"已停止"
+    const currentState = stateRef.current.serverStates.get(projectId) || { status: 'idle' as ServerStatus, output: [] }
+    updateServerState(projectId, {
+      ...currentState,
+      status: 'stopped',
+      output: [...currentState.output, '正在停止服务器...']
+    })
+    console.log('[App] UI updated to stopped state')
+    
+    // 在后台异步调用停止 API,不等待完成
+    console.log('[App] Calling stopServer API in background...')
+    window.electronAPI.stopServer(projectId)
+      .then(() => {
+        console.log('[App] stopServer API completed successfully')
+        // 后端会发送 status-change 事件,前端会自动更新状态
+      })
+      .catch((error: any) => {
+        console.error('[App] Failed to stop server:', error)
+        // 如果停止失败,恢复运行状态
+        const errorState = stateRef.current.serverStates.get(projectId) || { status: 'idle' as ServerStatus, output: [] }
+        updateServerState(projectId, {
+          ...errorState,
+          status: 'running',
+          output: [...errorState.output, `停止失败: ${error.message || error}`]
+        })
+      })
+      .finally(() => {
+        // API 调用完成后清理停止标记
+        console.log('[App] Cleaning up stopping flag for:', projectId)
+        stoppingProjectsRef.current.delete(projectId)
+        console.log('[App] Removed from stopping projects. Remaining:', Array.from(stoppingProjectsRef.current))
+      })
+  }, [updateServerState])
 
   // 在文件管理器中打开
   const handleOpenInExplorer = async (path: string) => {
@@ -139,213 +256,73 @@ function App() {
   }
 
   // 从历史中移除
-  const handleRemoveFromHistory = async (projectId: string) => {
+  const handleRemoveFromHistory = useCallback(async (projectId: string) => {
+    console.log('[App] handleRemoveFromHistory called:', projectId)
     if (!confirm('确定要从历史记录中删除此项目吗？')) {
       return
     }
     
     try {
+      // 使用 stateRef 获取最新的服务器状态
+      const serverState = stateRef.current.serverStates.get(projectId) || { status: 'idle' as ServerStatus, output: [] }
+      console.log('[App] Current server state:', serverState)
+      
       // 先检查服务器是否在运行，如果在运行则先停止
-      const state = getServerState(projectId)
-      if (state.status === 'running' || state.status === 'starting') {
+      if (serverState.status === 'running' || serverState.status === 'starting') {
+        console.log('[App] Server is running, stopping first...')
         try {
           await window.electronAPI.stopServer(projectId)
           // 等待一小段时间确保服务器完全停止
           await new Promise(resolve => setTimeout(resolve, 500))
+          console.log('[App] Server stopped before removal')
         } catch (error) {
-          console.error('Failed to stop server before removal:', error)
+          console.error('[App] Failed to stop server before removal:', error)
           // 即使停止失败也继续删除
         }
       }
-      
+
+      console.log('[App] Removing from history...')
       await window.electronAPI.removeFromHistory(projectId)
       await loadHistory()
-      
-      // 清除状态
-      setServerStates(prev => {
-        const newMap = new Map(prev)
-        newMap.delete(projectId)
-        return newMap
-      })
-      
-      if (selectedProjectId === projectId) {
-        setSelectedProjectId(null)
+
+      if (stateRef.current.selectedProjectId === projectId) {
+        setSelectedProject(null)
       }
+      console.log('[App] Project removed successfully')
     } catch (error) {
-      console.error('Failed to remove from history:', error)
+      console.error('[App] Failed to remove from history:', error)
+      alert(`删除失败: ${error}`)
     }
-  }
+  }, [loadHistory, setSelectedProject])
 
-  // 获取服务器状态
-  const getServerState = (projectId: string): ServerState => {
-    return serverStates.get(projectId) || { status: 'idle', output: [] }
-  }
-
-  // 获取状态显示文本
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'idle': return '未启动'
-      case 'starting': return '启动中'
-      case 'running': return '运行中'
-      case 'stopped': return '已停止'
-      case 'error': return '错误'
-      default: return '未知'
-    }
-  }
-
-  // 获取状态颜色
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'idle': return '#a8b5c9'
-      case 'starting': return '#d4a574'
-      case 'running': return '#7eb89f'
-      case 'stopped': return '#a8b5c9'
-      case 'error': return '#d47d7d'
-      default: return '#a8b5c9'
-    }
-  }
-
-  // 渲染输出行，将 URL 转换为可点击链接
-  const renderOutputLine = (line: string, index: number) => {
-    // URL 正则表达式
-    const urlRegex = /(https?:\/\/[^\s]+)/g
-    const parts = line.split(urlRegex)
-    
-    return (
-      <div key={index} className="output-line">
-        {parts.map((part, i) => {
-          if (part.match(urlRegex)) {
-            return (
-              <a
-                key={i}
-                href="#"
-                className="output-link"
-                onClick={(e) => {
-                  e.preventDefault()
-                  window.electronAPI.openInExplorer(part) // 使用 shell.openExternal
-                }}
-              >
-                {part}
-              </a>
-            )
-          }
-          return <span key={i}>{part}</span>
-        })}
-      </div>
-    )
-  }
 
   return (
     <div className="app">
-      <header className="header">
-        <h1>🚀 开发服务器启动工具</h1>
-        <button onClick={handleSelectFolder} className="btn-primary">
-          📁 选择项目
-        </button>
-      </header>
+      <Header onSelectFolder={handleSelectFolder} />
 
       <main className="main">
-        {selectedFolder && (
+        {state.selectedFolder && (
           <div className="selected-folder">
-            <p>已选择: {selectedFolder}</p>
+            <p>已选择: {state.selectedFolder}</p>
           </div>
         )}
 
         <div className="content-layout">
-          <div className="projects-section">
-            <h2>项目列表</h2>
-            {projects.length === 0 ? (
-              <p className="empty-message">// 暂无项目，请选择一个文件夹开始</p>
-            ) : (
-              <div className="projects-list">
-                {projects.map((project) => {
-                  const state = getServerState(project.id)
-                  const isRunning = state.status === 'running' || state.status === 'starting'
-                  const isSelected = selectedProjectId === project.id
-                  
-                  return (
-                    <div 
-                      key={project.id} 
-                      className={`project-card ${isSelected ? 'selected' : ''}`}
-                      onClick={() => setSelectedProjectId(project.id)}
-                    >
-                      <div className="project-info">
-                        <div className="project-header">
-                          <h3>{project.name}</h3>
-                          <span 
-                            className="status-badge"
-                            style={{ backgroundColor: getStatusColor(state.status) }}
-                          >
-                            {getStatusText(state.status)}
-                          </span>
-                        </div>
-                        <p className="project-path">{project.path}</p>
-                        <p className="project-time">
-                          最后启动: {new Date(project.lastLaunched).toLocaleString()}
-                        </p>
-                      </div>
-                      <div className="project-actions">
-                        {!isRunning ? (
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleLaunchProject(project)
-                            }}
-                            className="btn-success"
-                          >
-                            ▶ 启动
-                          </button>
-                        ) : (
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleStopProject(project.id)
-                            }}
-                            className="btn-warning"
-                          >
-                            ⏹ 停止
-                          </button>
-                        )}
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleOpenInExplorer(project.path)
-                          }}
-                          className="btn-secondary"
-                        >
-                          📂 打开
-                        </button>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleRemoveFromHistory(project.id)
-                          }}
-                          className="btn-danger"
-                        >
-                          🗑 删除
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+          <ProjectList
+            projects={state.projects}
+            serverStates={state.serverStates}
+            selectedProjectId={state.selectedProjectId}
+            onProjectSelect={setSelectedProject}
+            onProjectLaunch={handleLaunchProject}
+            onProjectStop={handleStopProject}
+            onProjectOpen={handleOpenInExplorer}
+            onProjectRemove={handleRemoveFromHistory}
+          />
 
-          {selectedProjectId && (
-            <div className="output-section">
-              <h2>服务器输出</h2>
-              <div className="output-console">
-                {getServerState(selectedProjectId).output.length === 0 ? (
-                  <p className="output-empty">// 等待输出...</p>
-                ) : (
-                  getServerState(selectedProjectId).output.map((line, index) => 
-                    renderOutputLine(line, index)
-                  )
-                )}
-              </div>
-            </div>
-          )}
+          <OutputConsole
+            projectId={state.selectedProjectId}
+            serverState={state.selectedProjectId ? getServerState(state.selectedProjectId) : null}
+          />
         </div>
       </main>
     </div>

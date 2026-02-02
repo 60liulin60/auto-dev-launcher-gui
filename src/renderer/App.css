@@ -545,3 +545,120 @@ button:active {
   background: var(--accent-warning);
   color: var(--terminal-bg);
 }
+
+/* 错误边界样式 */
+.error-boundary {
+  min-height: 100vh;
+  background: var(--terminal-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.error-boundary-content {
+  background: var(--terminal-surface);
+  border: 1px solid var(--terminal-border);
+  border-radius: 8px;
+  padding: 2rem;
+  max-width: 600px;
+  text-align: center;
+  box-shadow: 0 0 20px var(--glow-soft);
+}
+
+.error-boundary-content h2 {
+  color: var(--accent-danger);
+  margin-bottom: 1rem;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.error-boundary-content p {
+  color: var(--text-secondary);
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+
+.error-details {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--terminal-border);
+  border-radius: 4px;
+  margin: 1rem 0;
+  text-align: left;
+}
+
+.error-details summary {
+  padding: 0.5rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.error-details summary:hover {
+  color: var(--text-primary);
+}
+
+.error-stack {
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 0 0 4px 4px;
+  font-size: 0.85rem;
+  color: var(--accent-danger);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.error-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
+.error-actions .btn-primary,
+.error-actions .btn-secondary {
+  padding: 0.5rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.error-actions .btn-primary {
+  background: var(--accent-primary);
+  color: var(--terminal-bg);
+}
+
+.error-actions .btn-primary:hover {
+  background: var(--accent-secondary);
+  box-shadow: 0 0 10px var(--glow-soft);
+}
+
+.error-actions .btn-secondary {
+  background: var(--terminal-border);
+  color: var(--text-secondary);
+}
+
+.error-actions .btn-secondary:hover {
+  background: var(--text-dim);
+  color: var(--text-primary);
+}
+
+.retry-progress {
+  width: 100%;
+  height: 4px;
+  background: var(--terminal-border);
+  border-radius: 2px;
+  margin: 1rem 0;
+  overflow: hidden;
+}
+
+.retry-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-warning), var(--accent-success));
+  border-radius: 2px;
+  transition: width 1s ease;
+}

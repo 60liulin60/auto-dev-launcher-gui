@@ -6,6 +6,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 // 直接定义 IPC 通道常量（避免导入问题）
+// 直接定义 IPC 通道常量（避免导入问题）
 const IPC_CHANNELS = {
   PROJECT_SELECT_FOLDER: 'project:select-folder',
   PROJECT_LOAD_CONFIG: 'project:load-config',
@@ -39,7 +40,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(IPC_CHANNELS.SERVER_OUTPUT, (_, projectId, output) => callback(projectId, output))
   },
   onServerStatusChange: (callback: (projectId: string, status: string) => void) => {
-    ipcRenderer.on('server:status-change', (_, projectId, status) => callback(projectId, status))
+    ipcRenderer.on(IPC_CHANNELS.SERVER_STATUS_CHANGE, (_, projectId, status) => callback(projectId, status))
   },
   
   // 历史记录操作

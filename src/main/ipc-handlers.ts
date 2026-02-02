@@ -141,7 +141,8 @@ export function setupIPCHandlers(
 
   // 监听状态变化并转发到渲染进程
   processManager.on('status-change', (projectId: string, status: string) => {
-    mainWindow.webContents.send('server:status-change', projectId, status)
+    console.log(`IPC: Forwarding status change - projectId: ${projectId}, status: ${status}`)
+    mainWindow.webContents.send(IPC_CHANNELS.SERVER_STATUS_CHANGE, projectId, status)
   })
 
   // ==================== 历史记录操作 ====================

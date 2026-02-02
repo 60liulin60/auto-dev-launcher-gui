@@ -45,6 +45,10 @@ async function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
+      // 在开发模式下禁用webSecurity以避免CSP警告
+      webSecurity: process.env.NODE_ENV === 'production',
+      // 只在开发模式下允许不安全内容，避免警告
+      allowRunningInsecureContent: process.env.NODE_ENV === 'development',
     },
     title: '自动开发服务器启动工具',
     show: false, // 先不显示，等加载完成后再显示
@@ -61,12 +65,14 @@ async function createWindow() {
   if (process.env.NODE_ENV === 'development') {
     // 开发模式：加载 Vite 开发服务器
     mainWindow.loadURL('http://localhost:5173')
-    mainWindow.webContents.openDevTools()
   } else {
     // 生产模式：加载打包后的文件
     const indexPath = path.join(__dirname, '../renderer/index.html')
     mainWindow.loadFile(indexPath)
   }
+
+  // 总是打开开发者工具以便调试
+  mainWindow.webContents.openDevTools()
 
   // 窗口准备好后显示
   mainWindow.once('ready-to-show', () => {

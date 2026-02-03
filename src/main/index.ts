@@ -71,8 +71,10 @@ async function createWindow() {
     mainWindow.loadFile(indexPath)
   }
 
-  // 总是打开开发者工具以便调试
-  mainWindow.webContents.openDevTools()
+  // 只在开发模式下打开开发者工具
+  if (process.env.NODE_ENV === 'development') {
+    mainWindow.webContents.openDevTools()
+  }
 
   // 窗口准备好后显示
   mainWindow.once('ready-to-show', () => {
@@ -92,20 +94,26 @@ async function createWindow() {
       // 阻止默认关闭行为
       event.preventDefault()
       
+      console.log('[Main] Window closing, saving settings and stopping servers...')
+      
       // 保存窗口尺寸
       const bounds = mainWindow.getBounds()
       const settings = await storage.loadSettings()
       settings.windowBounds = bounds
       await storage.saveSettings(settings)
+      console.log('[Main] Settings saved')
       
       // 停止所有运行中的服务器
       try {
+        console.log('[Main] Stopping all servers...')
         await processManager.stopAllServers()
+        console.log('[Main] All servers stopped')
       } catch (error) {
-        console.error('Failed to stop servers on close:', error)
+        console.error('[Main] Failed to stop servers on close:', error)
       }
       
       // 现在可以真正关闭窗口了
+      console.log('[Main] Destroying window')
       mainWindow.destroy()
     }
   })

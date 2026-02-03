@@ -428,12 +428,30 @@ export class ProcessManager extends EventEmitter {
   async stopAllServers(): Promise<void> {
     const projectIds = Array.from(this.processes.keys())
     
-    await Promise.all(
-      projectIds.map(projectId => 
-        this.stopServer(projectId).catch(err => 
-          console.error(`Failed to stop server ${projectId}:`, err)
-        )
-      )
-    )
+    console.log(`Stopping all servers: ${projectIds.length} servers running`)
+    
+    // 立即发送终止信号给所有进程
+    for (const projectId of projectIds) {
+      try {
+        await this.stopServer(projectId)
+      } catch (err) {
+        console.error(`Failed to stop server ${projectId}:`, err)
+      }
+    }
+    
+    // 等待一小段时间确保所有进程都收到终止信号
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    
+    // 强制清理所有残留的进程
+    for (const projectId of projectIds) {
+      const childProcess = this.processes.get(projectId)
+      if (childProcess) {
+        console.log(`Force killing remaining process: ${projectId}`)
+        this.forceKillProcess(childProcess)
+        this.processes.delete(projectId)
+      }
+    }
+    
+    console.log('All servers stopped')
   }
 }

@@ -268,12 +268,23 @@ function App() {
       if (serverState.status === 'running' || serverState.status === 'starting') {
         console.log('[App] Server is running, stopping first...')
         try {
+          // 立即更新 UI 状态
+          updateServerState(projectId, {
+            ...serverState,
+            status: 'stopped',
+            output: [...serverState.output, '正在停止服务器以删除项目...']
+          })
+          
+          // 调用停止 API (会立即终止进程)
           await window.electronAPI.stopServer(projectId)
-          // 等待一小段时间确保服务器完全停止
-          await new Promise(resolve => setTimeout(resolve, 500))
-          console.log('[App] Server stopped before removal')
+          
+          // 等待2秒确保端口完全释放
+          console.log('[App] Waiting for port to be released...')
+          await new Promise(resolve => setTimeout(resolve, 2000))
+          console.log('[App] Server stopped and port released')
         } catch (error) {
           console.error('[App] Failed to stop server before removal:', error)
+          alert(`停止服务器失败: ${error}\n\n将继续删除项目,但端口可能仍被占用。`)
           // 即使停止失败也继续删除
         }
       }
@@ -290,7 +301,7 @@ function App() {
       console.error('[App] Failed to remove from history:', error)
       alert(`删除失败: ${error}`)
     }
-  }, [loadHistory, setSelectedProject])
+  }, [loadHistory, setSelectedProject, updateServerState])
 
 
   return (

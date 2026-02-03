@@ -42,9 +42,6 @@ function App() {
   // 使用 ref 来跟踪监听器是否已设置
   const isListenerSetupRef = useRef(false)
 
-  // 添加标志防止重复注册监听器
-  const listenersRegistered = useRef(false)
-
   // 加载历史记录
   const loadHistory = useCallback(async () => {
     try {

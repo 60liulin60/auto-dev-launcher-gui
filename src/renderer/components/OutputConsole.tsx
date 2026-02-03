@@ -20,7 +20,9 @@ const OutputConsole: React.FC<OutputConsoleProps> = memo(({ projectId, serverSta
                   className="output-link"
                   onClick={(e) => {
                     e.preventDefault()
-                    window.electronAPI.openInExplorer(part)
+                    window.electronAPI.openInExplorer(part).catch((error) => {
+                      console.error('Failed to open URL:', error)
+                    })
                   }}
                 >
                   {part}

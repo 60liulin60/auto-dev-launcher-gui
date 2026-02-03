@@ -364,7 +364,10 @@ export class ProcessManager extends EventEmitter {
     }
 
     // 在后台监听进程退出,清理资源
+    let cleaned = false
     const cleanup = () => {
+      if (cleaned) return
+      cleaned = true
       this.processes.delete(projectId)
       console.log(`Cleaned up process entry for ${projectId}`)
     }

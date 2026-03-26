@@ -16,6 +16,7 @@ const IPC_CHANNELS = {
   SERVER_GET_STATUS: 'server:get-status',
   SERVER_OUTPUT: 'server:output',
   SERVER_STATUS_CHANGE: 'server:status-change',
+  SERVER_URL_DETECTED: 'server:url-detected',
   HISTORY_LOAD: 'history:load',
   HISTORY_ADD: 'history:add',
   HISTORY_REMOVE: 'history:remove',
@@ -42,6 +43,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onServerStatusChange: (callback: (projectId: string, status: string) => void) => {
     ipcRenderer.on(IPC_CHANNELS.SERVER_STATUS_CHANGE, (_, projectId, status) => callback(projectId, status))
   },
+  onServerUrlDetected: (callback: (projectId: string, url: string) => void) => {
+    ipcRenderer.on(IPC_CHANNELS.SERVER_URL_DETECTED, (_, projectId, url) => callback(projectId, url))
+  },
   
   // 历史记录操作
   loadHistory: () => ipcRenderer.invoke(IPC_CHANNELS.HISTORY_LOAD),
@@ -66,6 +70,7 @@ declare global {
       getServerStatus: (projectId: string) => Promise<string>
       onServerOutput: (callback: (projectId: string, output: string) => void) => void
       onServerStatusChange: (callback: (projectId: string, status: string) => void) => void
+      onServerUrlDetected: (callback: (projectId: string, url: string) => void) => void
       loadHistory: () => Promise<any[]>
       addToHistory: (entry: any) => Promise<void>
       removeFromHistory: (projectId: string) => Promise<void>

@@ -84,6 +84,7 @@ export const IPC_CHANNELS = {
   SERVER_GET_STATUS: 'server:get-status',
   SERVER_OUTPUT: 'server:output',
   SERVER_STATUS_CHANGE: 'server:status-change',
+  SERVER_URL_DETECTED: 'server:url-detected',
   
   // 历史记录操作
   HISTORY_LOAD: 'history:load',

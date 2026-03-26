@@ -1,6 +1,6 @@
 {
   "name": "auto-dev-launcher-gui",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "自动开发服务器启动工具 - GUI 版本",
   "main": "dist/main/index.js",
   "repository": {
@@ -79,8 +79,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@types/react-window": "^2.0.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-window": "^2.2.7"
   },
   "devDependencies": {
     "@types/node": "^25.0.10",

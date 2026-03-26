@@ -14,9 +14,30 @@ import { EventEmitter } from 'events'
 import * as fs from 'fs'
 import * as path from 'path'
 
+// 禁止用户配置覆盖的关键系统环境变量白名单
+const ENV_PROTECTED_KEYS = new Set([
+  'PATH', 'Path', 'path',
+  'SYSTEMROOT', 'SystemRoot',
+  'SYSTEMDRIVE', 'SystemDrive',
+  'COMSPEC',
+  'WINDIR',
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'LD_LIBRARY_PATH',
+  'DYLD_LIBRARY_PATH',
+])
+
+// 识别本地服务 URL 的正则（兼容 vite/webpack/next 等框架输出格式）
+const LOCAL_URL_REGEX = /(?:Local|local|localhost|127\.0\.0\.1)[\s:]+(?:http:\/\/)?(?:localhost|127\.0\.0\.1):(\d+)/i
+
 export class ProcessManager extends EventEmitter {
   private processes: Map<string, ChildProcess> = new Map()
   private processInfo: Map<string, ServerProcess> = new Map()
+  
+  // 日志缓冲区，用于批量发送日志，减少 IPC 背压
+  private outputBuffers: Map<string, string[]> = new Map()
+  private bufferIntervals: Map<string, NodeJS.Timeout> = new Map()
+  private readonly BUFFER_FLUSH_INTERVAL = 100 // 100ms 冲刷一次
 
   // 配置常量
   private readonly DEPENDENCY_INSTALL_TIMEOUT = 5 * 60 * 1000 // 5分钟
@@ -121,17 +142,17 @@ export class ProcessManager extends EventEmitter {
 
       let hasExited = false
       
-      // 监听安装输出
+      // 监听安装输出 - 使用缓冲区
       installProcess.stdout?.on('data', (data: Buffer) => {
         const output = data.toString('utf8')
         const cleanOutput = output.replace(/\x1b\[[0-9;]*m/g, '')
-        this.emit('output', projectId, cleanOutput)
+        this.appendToBuffer(projectId, cleanOutput)
       })
       
       installProcess.stderr?.on('data', (data: Buffer) => {
         const output = data.toString('utf8')
         const cleanOutput = output.replace(/\x1b\[[0-9;]*m/g, '')
-        this.emit('output', projectId, cleanOutput)
+        this.appendToBuffer(projectId, cleanOutput)
       })
       
       installProcess.on('exit', (code: number | null) => {
@@ -217,12 +238,25 @@ export class ProcessManager extends EventEmitter {
         throw new Error(`工作目录无效: ${workDirValidation.error}`)
       }
       
+      // 合并环境变量，过滤白名单中受保护的 key
+      const safeUserEnv: Record<string, string> = {}
+      if (config.env) {
+        for (const [key, value] of Object.entries(config.env)) {
+          if (ENV_PROTECTED_KEYS.has(key)) {
+            console.warn(`[ProcessManager] 已拦截对受保护环境变量的覆盖: ${key}`)
+            this.emit('output', projectId, `[安全] 已忽略对系统环境变量 "${key}" 的覆盖\n`)
+          } else {
+            safeUserEnv[key] = value
+          }
+        }
+      }
+
       // 启动进程
       const childProcess = spawn(command, args, {
         cwd: workDir,
         env: {
           ...process.env,
-          ...config.env,
+          ...safeUserEnv,
         },
         shell: true,
         windowsHide: false,
@@ -260,7 +294,10 @@ export class ProcessManager extends EventEmitter {
         startupTimeout = null
       }, 10000)
 
-      // 监听标准输出
+      // 标记是否已检测到本地 URL，避免重复上报
+      let urlDetected = false
+
+      // 监听标准输出 - 使用缓冲区
       childProcess.stdout?.on('data', (data: Buffer) => {
         const output = data.toString('utf8')
         // 移除 ANSI 颜色代码，使输出更清晰
@@ -278,15 +315,40 @@ export class ProcessManager extends EventEmitter {
           this.emit('status-change', projectId, 'running')
         }
 
-        this.emit('output', projectId, cleanOutput)
+        // 检测本地服务 URL（只上报一次）
+        if (!urlDetected) {
+          const match = cleanOutput.match(LOCAL_URL_REGEX)
+          if (match) {
+            const port = match[1]
+            const detectedUrl = `http://localhost:${port}`
+            urlDetected = true
+            console.log(`[ProcessManager] 检测到本地服务 URL: ${detectedUrl}`)
+            this.emit('url-detected', projectId, detectedUrl)
+          }
+        }
+
+        this.appendToBuffer(projectId, cleanOutput)
       })
 
-      // 监听错误输出
+      // 监听错误输出 - 使用缓冲区（部分框架如 Next.js 将信息输出到 stderr）
       childProcess.stderr?.on('data', (data: Buffer) => {
         const output = data.toString('utf8')
         // 移除 ANSI 颜色代码
         const cleanOutput = output.replace(/\x1b\[[0-9;]*m/g, '')
-        this.emit('output', projectId, cleanOutput)
+
+        // 同样检测 URL
+        if (!urlDetected) {
+          const match = cleanOutput.match(LOCAL_URL_REGEX)
+          if (match) {
+            const port = match[1]
+            const detectedUrl = `http://localhost:${port}`
+            urlDetected = true
+            console.log(`[ProcessManager] 检测到本地服务 URL (stderr): ${detectedUrl}`)
+            this.emit('url-detected', projectId, detectedUrl)
+          }
+        }
+
+        this.appendToBuffer(projectId, cleanOutput)
       })
 
       // 监听进程启动
@@ -314,6 +376,10 @@ export class ProcessManager extends EventEmitter {
         this.emit('status-change', projectId, 'stopped')
         this.emit('exit', projectId, code)
 
+        // 立即冲刷该项目的缓冲区
+        this.flushBuffer(projectId)
+        this.stopBufferInterval(projectId)
+
         // 清理
         this.processes.delete(projectId)
         console.log(`Cleaned up process entry for ${projectId}`)
@@ -324,6 +390,48 @@ export class ProcessManager extends EventEmitter {
       processInfo.status = 'error'
       this.processInfo.set(projectId, processInfo)
       throw error
+    }
+  }
+
+  /**
+   * 将输出添加到缓冲区并启动定时冲刷
+   */
+  private appendToBuffer(projectId: string, output: string): void {
+    if (!this.outputBuffers.has(projectId)) {
+      this.outputBuffers.set(projectId, [])
+    }
+    
+    this.outputBuffers.get(projectId)!.push(output)
+    
+    // 如果没有正在运行的冲刷定时器，则启动一个
+    if (!this.bufferIntervals.has(projectId)) {
+      const interval = setInterval(() => {
+        this.flushBuffer(projectId)
+      }, this.BUFFER_FLUSH_INTERVAL)
+      this.bufferIntervals.set(projectId, interval)
+    }
+  }
+
+  /**
+   * 冲刷缓冲区，将合并后的日志发送给渲染进程
+   */
+  private flushBuffer(projectId: string): void {
+    const buffer = this.outputBuffers.get(projectId)
+    if (buffer && buffer.length > 0) {
+      const mergedOutput = buffer.join('')
+      this.emit('output', projectId, mergedOutput)
+      this.outputBuffers.set(projectId, []) // 清空缓冲区
+    }
+  }
+
+  /**
+   * 停止缓冲区定时器
+   */
+  private stopBufferInterval(projectId: string): void {
+    const interval = this.bufferIntervals.get(projectId)
+    if (interval) {
+      clearInterval(interval)
+      this.bufferIntervals.delete(projectId)
     }
   }
 

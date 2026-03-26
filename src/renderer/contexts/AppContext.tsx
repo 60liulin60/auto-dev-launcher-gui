@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useReducer, ReactNode } from 'react'
-import { ProjectHistoryEntry, ServerState } from '../types'
+import React, { createContext, useCallback, useContext, useMemo, useReducer, ReactNode } from 'react'
+import { ProjectHistoryEntry, ServerState, ServerStatus } from '../types'
 
 // 应用状态接口
 export interface AppState {
@@ -153,25 +153,82 @@ interface AppProviderProps {
 export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [state, dispatch] = useReducer(appReducer, initialState)
 
-  // 便捷方法
-  const contextValue: AppContextType = {
+  const loadProjects = useCallback((projects: ProjectHistoryEntry[]) => {
+    dispatch({ type: 'LOAD_PROJECTS', payload: projects })
+  }, [])
+
+  const addProject = useCallback((project: ProjectHistoryEntry) => {
+    dispatch({ type: 'ADD_PROJECT', payload: project })
+  }, [])
+
+  const removeProject = useCallback((projectId: string) => {
+    dispatch({ type: 'REMOVE_PROJECT', payload: projectId })
+  }, [])
+
+  const updateProject = useCallback((id: string, updates: Partial<ProjectHistoryEntry>) => {
+    dispatch({ type: 'UPDATE_PROJECT', payload: { id, updates } })
+  }, [])
+
+  const setSelectedProject = useCallback((projectId: string | null) => {
+    dispatch({ type: 'SET_SELECTED_PROJECT', payload: projectId })
+  }, [])
+
+  const setSelectedFolder = useCallback((folder: string | null) => {
+    dispatch({ type: 'SET_SELECTED_FOLDER', payload: folder })
+  }, [])
+
+  const updateServerState = useCallback((projectId: string, serverState: ServerState) => {
+    dispatch({
+      type: 'UPDATE_SERVER_STATE',
+      payload: { projectId, state: serverState }
+    })
+  }, [])
+
+  const setLoading = useCallback((loading: boolean) => {
+    dispatch({ type: 'SET_LOADING', payload: loading })
+  }, [])
+
+  const setError = useCallback((error: string | null) => {
+    dispatch({ type: 'SET_ERROR', payload: error })
+  }, [])
+
+  const clearError = useCallback(() => {
+    dispatch({ type: 'CLEAR_ERROR' })
+  }, [])
+
+  const getServerState = useCallback((projectId: string) => {
+    return state.serverStates.get(projectId) || { status: 'idle' as ServerStatus, output: [] }
+  }, [state.serverStates])
+
+  const contextValue = useMemo<AppContextType>(() => ({
     state,
     dispatch,
-    loadProjects: (projects) => dispatch({ type: 'LOAD_PROJECTS', payload: projects }),
-    addProject: (project) => dispatch({ type: 'ADD_PROJECT', payload: project }),
-    removeProject: (projectId) => dispatch({ type: 'REMOVE_PROJECT', payload: projectId }),
-    updateProject: (id, updates) => dispatch({ type: 'UPDATE_PROJECT', payload: { id, updates } }),
-    setSelectedProject: (projectId) => dispatch({ type: 'SET_SELECTED_PROJECT', payload: projectId }),
-    setSelectedFolder: (folder) => dispatch({ type: 'SET_SELECTED_FOLDER', payload: folder }),
-    updateServerState: (projectId, serverState) => dispatch({
-      type: 'UPDATE_SERVER_STATE',
-      payload: { projectId, serverState }
-    }),
-    setLoading: (loading) => dispatch({ type: 'SET_LOADING', payload: loading }),
-    setError: (error) => dispatch({ type: 'SET_ERROR', payload: error }),
-    clearError: () => dispatch({ type: 'CLEAR_ERROR' }),
-    getServerState: (projectId) => state.serverStates.get(projectId) || { status: 'idle' as ServerStatus, output: [] }
-  }
+    loadProjects,
+    addProject,
+    removeProject,
+    updateProject,
+    setSelectedProject,
+    setSelectedFolder,
+    updateServerState,
+    setLoading,
+    setError,
+    clearError,
+    getServerState
+  }), [
+    state,
+    dispatch,
+    loadProjects,
+    addProject,
+    removeProject,
+    updateProject,
+    setSelectedProject,
+    setSelectedFolder,
+    updateServerState,
+    setLoading,
+    setError,
+    clearError,
+    getServerState
+  ])
 
   return (
     <AppContext.Provider value={contextValue}>

@@ -145,6 +145,12 @@ export function setupIPCHandlers(
     mainWindow.webContents.send(IPC_CHANNELS.SERVER_STATUS_CHANGE, projectId, status)
   })
 
+  // 监听检测到的本地服务 URL 并转发到渲染进程
+  processManager.on('url-detected', (projectId: string, url: string) => {
+    console.log(`IPC: Forwarding detected URL - projectId: ${projectId}, url: ${url}`)
+    mainWindow.webContents.send(IPC_CHANNELS.SERVER_URL_DETECTED, projectId, url)
+  })
+
   // ==================== 历史记录操作 ====================
   
   /**

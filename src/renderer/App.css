@@ -379,6 +379,12 @@
   letter-spacing: 1px;
 }
 
+/* 当 h2 在 output-header 内时覆盖 margin */
+.output-header h2 {
+  margin-top: 30px;
+  margin-bottom: 0;
+}
+
 .output-console {
   background: var(--terminal-bg);
   border-radius: 0;
@@ -661,4 +667,131 @@ button:active {
   background: linear-gradient(90deg, var(--accent-warning), var(--accent-success));
   border-radius: 2px;
   transition: width 1s ease;
+}
+
+/* 输出控制台头部：标题 + 筛选控件 */
+.output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.output-header h2 {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.output-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.output-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-input {
+  background: var(--terminal-bg);
+  border: 1px solid var(--terminal-border);
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 4px 28px 4px 8px;
+  outline: none;
+  border-radius: 2px;
+  width: 140px;
+  transition: border-color 0.2s ease;
+}
+
+.search-input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 6px var(--glow-soft);
+}
+
+.search-input::placeholder {
+  color: var(--text-dim);
+}
+
+.search-clear {
+  position: absolute;
+  right: 4px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 2px 4px;
+  cursor: pointer;
+  line-height: 1;
+  min-width: unset;
+  box-shadow: none;
+  transition: color 0.2s;
+}
+
+.search-clear:hover {
+  color: var(--accent-danger);
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-filter {
+  background: transparent;
+  color: var(--text-dim);
+  border-color: var(--terminal-border);
+  font-size: 10px;
+  padding: 4px 10px;
+  letter-spacing: 0;
+}
+
+.btn-filter:hover {
+  border-color: var(--accent-warning);
+  color: var(--accent-warning);
+}
+
+.btn-filter.active {
+  background: rgba(212, 165, 116, 0.15);
+  color: var(--accent-warning);
+  border-color: var(--accent-warning);
+  box-shadow: 0 0 8px rgba(212, 165, 116, 0.2);
+}
+
+.output-filter-hint {
+  margin: 4px 0 8px;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
+}
+
+/* 错误行高亮 */
+.output-line-error {
+  color: var(--accent-danger) !important;
+  background: rgba(212, 125, 125, 0.05);
+}
+
+/* 项目卡片中检测到的 URL 链接 */
+.project-url-link {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--accent-success);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--accent-success);
+  font-family: 'JetBrains Mono', monospace;
+  transition: all 0.2s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.project-url-link:hover {
+  color: var(--accent-secondary);
+  border-bottom-color: var(--accent-secondary);
 }

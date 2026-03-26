@@ -32,6 +32,7 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
   }
 
   const isRunning = serverState.status === 'running' || serverState.status === 'starting'
+  const detectedUrl = serverState.detectedUrl
 
   return (
     <div
@@ -52,6 +53,20 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
         <p className="project-time">
           最后启动: {new Date(project.lastLaunched).toLocaleString()}
         </p>
+        {detectedUrl && isRunning && (
+          <a
+            className="project-url-link"
+            href="#"
+            title={`在浏览器中打开 ${detectedUrl}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              window.electronAPI.openInExplorer(detectedUrl).catch(console.error)
+            }}
+          >
+            🌐 {detectedUrl}
+          </a>
+        )}
       </div>
       <div className="project-actions">
         {!isRunning ? (

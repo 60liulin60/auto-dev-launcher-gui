@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef } from 'react'
+import { useEffect, useCallback, useRef } from 'react'
 import './App.css'
 import { ServerStatus } from './types'
 import { useApp } from './contexts/AppContext'
@@ -18,10 +18,14 @@ function App() {
     getServerState
   } = useApp()
 
-  const [isLaunching, setIsLaunching] = useState(false)
+  const isLaunchingRef = useRef(false)
   
-  // 使用 ref 来跟踪正在停止的项目,避免依赖问题
+  // 正在停止中的项目 ID 集合，防止重复点击
   const stoppingProjectsRef = useRef<Set<string>>(new Set())
+
+  // 用于缓冲日志输出的 Ref
+  const pendingOutputsRef = useRef<Map<string, string[]>>(new Map())
+  const rafIdRef = useRef<number | null>(null)
 
   // 创建 state ref 以在事件监听器中访问最新状态
   const stateRef = useRef(state)
@@ -38,6 +42,33 @@ function App() {
   useEffect(() => {
     dispatchRef.current = dispatch
   }, [dispatch])
+
+  // 处理缓冲的日志输出
+  const flushOutputs = useCallback(() => {
+    if (pendingOutputsRef.current.size === 0) {
+      rafIdRef.current = null
+      return
+    }
+
+    pendingOutputsRef.current.forEach((outputs, projectId) => {
+      if (outputs.length === 0) return
+
+      dispatchRef.current({
+        type: 'UPDATE_SERVER_STATE_FUNCTIONAL',
+        payload: {
+          projectId,
+          updater: (currentState) => ({
+            ...currentState,
+            status: currentState.status === 'idle' ? 'running' as ServerStatus : currentState.status,
+            output: [...currentState.output, ...outputs].slice(-100)
+          })
+        }
+      })
+    })
+
+    pendingOutputsRef.current.clear()
+    rafIdRef.current = null
+  }, [])
 
   // 使用 ref 来跟踪监听器是否已设置
   const isListenerSetupRef = useRef(false)
@@ -60,27 +91,17 @@ function App() {
       return
     }
     
-    // 设置事件监听器 - 使用函数式更新避免闭包问题
+    // 设置事件监听器 - 使用 rAF 节流更新
     const handleServerOutput = (projectId: string, output: string) => {
-      console.log('[App] Received server output:', projectId, output.substring(0, 50))
-      
-      // 使用函数式更新,确保获取最新状态
-      dispatchRef.current({
-        type: 'UPDATE_SERVER_STATE_FUNCTIONAL',
-        payload: {
-          projectId,
-          updater: (currentState) => {
-            console.log('[App] Current state:', currentState.status, 'outputs:', currentState.output.length)
-            const newState = {
-              ...currentState,
-              status: currentState.status === 'idle' ? 'running' as ServerStatus : currentState.status,
-              output: [...currentState.output, output].slice(-100)
-            }
-            console.log('[App] New state:', newState.status, 'outputs:', newState.output.length)
-            return newState
-          }
-        }
-      })
+      // 将输出添加到缓冲区
+      const currentOutputs = pendingOutputsRef.current.get(projectId) || []
+      currentOutputs.push(output)
+      pendingOutputsRef.current.set(projectId, currentOutputs)
+
+      // 请求下一帧更新
+      if (rafIdRef.current === null) {
+        rafIdRef.current = requestAnimationFrame(flushOutputs)
+      }
     }
 
     const handleServerStatusChange = (projectId: string, status: string) => {
@@ -98,10 +119,25 @@ function App() {
       })
     }
 
+    const handleServerUrlDetected = (projectId: string, url: string) => {
+      console.log('[App] Detected local URL:', projectId, url)
+      dispatchRef.current({
+        type: 'UPDATE_SERVER_STATE_FUNCTIONAL',
+        payload: {
+          projectId,
+          updater: (currentState) => ({
+            ...currentState,
+            detectedUrl: url
+          })
+        }
+      })
+    }
+
     // 注册监听器
     console.log('[App] Setting up IPC listeners')
     window.electronAPI.onServerOutput(handleServerOutput)
     window.electronAPI.onServerStatusChange(handleServerStatusChange)
+    window.electronAPI.onServerUrlDetected(handleServerUrlDetected)
     
     // 标记监听器已设置
     isListenerSetupRef.current = true
@@ -110,10 +146,15 @@ function App() {
     loadHistory()
 
     // 注意：这里不设置清理函数，因为electron的IPC监听器不支持清理
-  }, [loadHistory]) // 移除 state.serverStates 依赖，避免重复注册监听器
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+      }
+    }
+  }, [loadHistory, flushOutputs]) // 移除 state.serverStates 依赖，避免重复注册监听器
 
   // 选择文件夹
-  const handleSelectFolder = async () => {
+  const handleSelectFolder = useCallback(async () => {
     try {
       const folder = await window.electronAPI.selectFolder()
       if (folder) {
@@ -144,7 +185,7 @@ function App() {
     } catch (error) {
       console.error('Failed to select folder:', error)
     }
-  }
+  }, [loadHistory, setSelectedFolder])
 
   // 启动项目
   const handleLaunchProject = useCallback(async (project: ProjectHistoryEntry) => {
@@ -157,12 +198,12 @@ function App() {
     }
     
     // 防止重复启动
-    if (isLaunching) {
+    if (isLaunchingRef.current) {
       console.log('[App] Already launching, skipping')
       return
     }
 
-    setIsLaunching(true)
+    isLaunchingRef.current = true
 
     try {
       console.log('[App] Initializing server state for:', project.id)
@@ -170,13 +211,6 @@ function App() {
       const initialState = { status: 'starting' as ServerStatus, output: [] }
       console.log('[App] Setting initial state:', initialState)
       updateServerState(project.id, initialState)
-      
-      // 验证状态是否被设置
-      setTimeout(() => {
-        const verifyState = getServerState(project.id)
-        console.log('[App] Verified state after init:', verifyState)
-      }, 100)
-
       console.log('[App] Calling startServer API')
       await window.electronAPI.startServer(project.id, project.path, project.config)
       console.log('[App] Server started successfully')
@@ -190,9 +224,9 @@ function App() {
         output: [`错误: ${error.message || error}`]
       })
     } finally {
-      setIsLaunching(false)
+      isLaunchingRef.current = false
     }
-  }, [isLaunching, updateServerState, setSelectedProject, getServerState])
+  }, [setSelectedProject, updateServerState])
 
   // 停止项目
   const handleStopProject = useCallback((projectId: string) => {
@@ -244,13 +278,13 @@ function App() {
   }, [updateServerState])
 
   // 在文件管理器中打开
-  const handleOpenInExplorer = async (path: string) => {
+  const handleOpenInExplorer = useCallback(async (path: string) => {
     try {
       await window.electronAPI.openInExplorer(path)
     } catch (error) {
       console.error('Failed to open in explorer:', error)
     }
-  }
+  }, [])
 
   // 从历史中移除
   const handleRemoveFromHistory = useCallback(async (projectId: string) => {

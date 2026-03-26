@@ -1,9 +1,10 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { List, type ListImperativeAPI, type RowComponentProps } from 'react-window'
 import { OutputConsoleProps } from '../types'
+import { desktop } from '../lib/desktop'
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g
-const OUTPUT_HEIGHT = 400
+const OUTPUT_DEFAULT_HEIGHT = 400
 const OUTPUT_ROW_HEIGHT = 24
 
 const isErrorLine = (line: string): boolean => {
@@ -75,9 +76,11 @@ const OutputRow = memo(({ ariaAttributes, index, style, lines }: RowComponentPro
       {...ariaAttributes}
       style={{
         ...style,
+        boxSizing: 'border-box',
         lineHeight: `${OUTPUT_ROW_HEIGHT}px`,
         overflow: 'hidden',
-        whiteSpace: 'nowrap',
+        paddingRight: '12px',
+        whiteSpace: 'pre',
       }}
       className={`output-line ${line.isError ? 'output-line-error' : ''}`}
     >
@@ -90,7 +93,7 @@ const OutputRow = memo(({ ariaAttributes, index, style, lines }: RowComponentPro
               className="output-link"
               onClick={(event) => {
                 event.preventDefault()
-                window.electronAPI.openInExplorer(part).catch((error) => {
+                desktop.openInExplorer(part).catch((error) => {
                   console.error('Failed to open URL:', error)
                 })
               }}
@@ -214,12 +217,14 @@ const OutputConsole: React.FC<OutputConsoleProps> = memo(({ projectId, serverSta
           </p>
         ) : (
           <List
+            className="output-list"
+            defaultHeight={OUTPUT_DEFAULT_HEIGHT}
             listRef={listRef}
             rowComponent={OutputRow}
             rowCount={filteredOutput.length}
             rowHeight={OUTPUT_ROW_HEIGHT}
             rowProps={rowProps}
-            style={{ height: OUTPUT_HEIGHT, width: '100%' }}
+            style={{ height: '100%', width: '100%' }}
           />
         )}
       </div>

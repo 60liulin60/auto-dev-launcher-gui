@@ -389,39 +389,37 @@
   background: var(--terminal-bg);
   border-radius: 0;
   border: 1px solid var(--terminal-border);
-  padding: 15px;
+  padding: 12px 0 12px 12px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   color: var(--text-secondary);
-  overflow-y: auto;
+  overflow: hidden;
   flex: 1;
   line-height: 1.6;
   position: relative;
 }
 
-.output-console::before {
-  content: '$ ';
-  color: var(--accent-green);
-  position: sticky;
-  top: 0;
-  left: 0;
+.output-list {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  scrollbar-gutter: stable;
 }
 
-.output-console::-webkit-scrollbar {
+.output-list::-webkit-scrollbar {
   width: 10px;
 }
 
-.output-console::-webkit-scrollbar-track {
+.output-list::-webkit-scrollbar-track {
   background: var(--terminal-bg);
   border: 1px solid var(--terminal-border);
 }
 
-.output-console::-webkit-scrollbar-thumb {
+.output-list::-webkit-scrollbar-thumb {
   background: var(--accent-primary);
   border: 2px solid var(--terminal-bg);
 }
 
-.output-console::-webkit-scrollbar-thumb:hover {
+.output-list::-webkit-scrollbar-thumb:hover {
   background: var(--accent-secondary);
 }
 
@@ -436,9 +434,10 @@
 .output-line {
   margin-bottom: 0;
   line-height: 24px;
-  white-space: nowrap;
+  white-space: pre;
   word-break: normal;
   overflow: hidden;
+  text-overflow: clip;
   animation: fadeIn 0.3s ease;
 }
 

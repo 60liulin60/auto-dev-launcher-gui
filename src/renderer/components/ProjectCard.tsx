@@ -1,5 +1,6 @@
 import React, { memo } from 'react'
 import { ProjectCardProps, ServerStatus } from '../types'
+import { desktop } from '../lib/desktop'
 
 const ProjectCard: React.FC<ProjectCardProps> = memo(({
   project,
@@ -58,10 +59,10 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
             className="project-url-link"
             href="#"
             title={`在浏览器中打开 ${detectedUrl}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              e.preventDefault()
-              window.electronAPI.openInExplorer(detectedUrl).catch(console.error)
+            onClick={(event) => {
+              event.stopPropagation()
+              event.preventDefault()
+              desktop.openInExplorer(detectedUrl).catch(console.error)
             }}
           >
             🌐 {detectedUrl}
@@ -71,8 +72,8 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
       <div className="project-actions">
         {!isRunning ? (
           <button
-            onClick={(e) => {
-              e.stopPropagation()
+            onClick={(event) => {
+              event.stopPropagation()
               onLaunch(project)
             }}
             className="btn-success"
@@ -81,8 +82,8 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
           </button>
         ) : (
           <button
-            onClick={(e) => {
-              e.stopPropagation()
+            onClick={(event) => {
+              event.stopPropagation()
               onStop(project.id)
             }}
             className="btn-warning"
@@ -91,8 +92,8 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
           </button>
         )}
         <button
-          onClick={(e) => {
-            e.stopPropagation()
+          onClick={(event) => {
+            event.stopPropagation()
             onOpenInExplorer(project.path)
           }}
           className="btn-secondary"
@@ -100,8 +101,8 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
           📂 打开
         </button>
         <button
-          onClick={(e) => {
-            e.stopPropagation()
+          onClick={(event) => {
+            event.stopPropagation()
             onRemove(project.id)
           }}
           className="btn-danger"

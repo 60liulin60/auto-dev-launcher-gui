@@ -3,24 +3,20 @@ node_modules/
 .pnp
 .pnp.js
 
-release-final/win-unpacked
-release/
 # Testing
 coverage/
 *.log
 
-# Production
+# Build outputs
 dist/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/.cargo/
 
-# Build directory (but keep icon files)
+# Build directory (keep source icons)
 build/*
 !build/icon.png
 !build/icon.ico
-!build/ICON_INSTRUCTIONS.md
-
-# Release files (too large for GitHub)
-release-final/
-release/
 
 # Environment
 .env
@@ -40,12 +36,10 @@ Thumbs.db
 
 # Logs
 logs/
-*.log
 npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.electron-cache/
 
 # Database
 *.sqlite

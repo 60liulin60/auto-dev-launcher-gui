@@ -13,6 +13,9 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/.cargo/
 
+release-packages/
+artifacts/
+
 # Build directory (keep source icons)
 build/*
 !build/icon.png

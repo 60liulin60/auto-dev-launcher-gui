@@ -1,4 +1,4 @@
-﻿mod config;
+mod config;
 mod process_manager;
 mod storage;
 mod types;
@@ -7,7 +7,12 @@ use config::{load_project_config, sanitize_path, validate_dev_config};
 use process_manager::ProcessManager;
 use storage::StorageManager;
 use tauri::{Manager, WindowEvent};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use types::{AppSettings, DevConfig, ProjectHistoryEntry, ValidationResult, WindowBounds};
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 struct AppState {
   storage: StorageManager,
@@ -194,7 +199,10 @@ fn capture_window_bounds(window: &tauri::Window) -> Option<WindowBounds> {
 
 fn open_url(url: &str) -> Result<(), String> {
   if cfg!(target_os = "windows") {
-    std::process::Command::new("cmd")
+    let mut command = std::process::Command::new("cmd");
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
       .args(["/C", "start", "", url])
       .spawn()
       .map_err(|error| format!("鏃犳硶鎵撳紑閾炬帴: {error}"))?;

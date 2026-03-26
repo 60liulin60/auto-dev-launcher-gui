@@ -27,12 +27,16 @@ use std::{
   thread,
   time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, Emitter};
 
 const BUFFER_FLUSH_INTERVAL_MS: u64 = 100;
 const DEPENDENCY_INSTALL_TIMEOUT_MS: u64 = 5 * 60 * 1000;
 const STARTUP_TIMEOUT_MS: u64 = 10 * 1000;
 const STOP_ALL_TIMEOUT_MS: u64 = 10 * 1000;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 const STOP_WAIT_INTERVAL_MS: u64 = 100;
 
 const EVENT_SERVER_OUTPUT: &str = "server-output";
@@ -194,7 +198,10 @@ impl ProcessManager {
     .ok_or_else(|| "project is not running".to_string())?;
 
     if cfg!(target_os = "windows") {
-      let taskkill_succeeded = Command::new("taskkill")
+      let mut taskkill_command = Command::new("taskkill");
+      #[cfg(target_os = "windows")]
+      taskkill_command.creation_flags(CREATE_NO_WINDOW);
+      let taskkill_succeeded = taskkill_command
         .args([
           "/pid",
           &managed_process.pid.to_string(),
@@ -747,6 +754,8 @@ fn apply_safe_environment(
 fn create_shell_command(raw_command: &str) -> Command {
   if cfg!(target_os = "windows") {
     let mut command = Command::new("cmd");
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
     command.args(["/C", raw_command]);
     return command;
   }

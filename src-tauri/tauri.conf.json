@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "开发服务器启动工具",
+  "productName": "Auto Dev Launcher",
   "version": "1.0.5",
   "identifier": "com.autodevlauncher.gui",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "开发服务器启动工具",
+        "title": "Auto Dev Launcher",
         "width": 1200,
         "height": 800,
         "resizable": true
@@ -26,6 +26,14 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "windows": {
+      "nsis": {
+        "languages": [
+          "English"
+        ],
+        "displayLanguageSelector": false
+      }
+    },
     "icon": [
       "icons/icon.png",
       "icons/icon.ico"

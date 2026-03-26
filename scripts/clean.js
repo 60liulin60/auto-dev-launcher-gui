@@ -5,6 +5,7 @@ const targets = [
   path.join(__dirname, '..', 'dist'),
   path.join(__dirname, '..', 'release'),
   path.join(__dirname, '..', 'release-final'),
+  path.join(__dirname, '..', 'release-packages'),
   path.join(__dirname, '..', 'src-tauri', 'target', 'release', 'bundle'),
 ]
 

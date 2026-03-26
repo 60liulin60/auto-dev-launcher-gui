@@ -22,9 +22,10 @@
     "start": "tauri dev",
     "test": "vitest run",
     "test:watch": "vitest",
-    "package": "pnpm run verify:icon && tauri build",
-    "package:win": "pnpm run verify:icon && tauri build --bundles nsis",
-    "package:win:nosign": "pnpm run verify:icon && tauri build --bundles nsis"
+    "package": "pnpm run verify:icon && tauri build && node scripts/collect-release-packages.js",
+    "package:win": "pnpm run verify:icon && tauri build --bundles nsis && node scripts/collect-release-packages.js",
+    "package:win:nosign": "pnpm run verify:icon && tauri build --bundles nsis && node scripts/collect-release-packages.js",
+    "prepackage:win:nosign": "pnpm run clean"
   },
   "keywords": [
     "tauri",

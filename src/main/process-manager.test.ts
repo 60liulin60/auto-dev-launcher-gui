@@ -74,11 +74,11 @@ describe('ProcessManager Log Buffering', () => {
     // Trigger buffer start
     processManager.appendToBuffer(projectId, 'Exiting log')
     
-    expect(processManager.bufferIntervals.has(projectId)).toBe(true)
+    expect(processManager.bufferTimers.has(projectId)).toBe(true)
     
-    // Manually call internal stopBufferInterval or trigger exit logic
-    processManager.stopBufferInterval(projectId)
+    // Manually call internal stopBufferTimer or trigger exit logic
+    processManager.stopBufferTimer(projectId)
     
-    expect(processManager.bufferIntervals.has(projectId)).toBe(false)
+    expect(processManager.bufferTimers.has(projectId)).toBe(false)
   })
 })

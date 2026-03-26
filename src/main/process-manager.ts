@@ -36,7 +36,7 @@ export class ProcessManager extends EventEmitter {
   
   // 日志缓冲区，用于批量发送日志，减少 IPC 背压
   private outputBuffers: Map<string, string[]> = new Map()
-  private bufferIntervals: Map<string, NodeJS.Timeout> = new Map()
+  private bufferTimers: Map<string, NodeJS.Timeout> = new Map()
   private readonly BUFFER_FLUSH_INTERVAL = 100 // 100ms 冲刷一次
 
   // 配置常量
@@ -378,7 +378,7 @@ export class ProcessManager extends EventEmitter {
 
         // 立即冲刷该项目的缓冲区
         this.flushBuffer(projectId)
-        this.stopBufferInterval(projectId)
+        this.stopBufferTimer(projectId)
 
         // 清理
         this.processes.delete(projectId)
@@ -396,20 +396,30 @@ export class ProcessManager extends EventEmitter {
   /**
    * 将输出添加到缓冲区并启动定时冲刷
    */
-  private appendToBuffer(projectId: string, output: string): void {
+private appendToBuffer(projectId: string, output: string): void {
     if (!this.outputBuffers.has(projectId)) {
       this.outputBuffers.set(projectId, [])
     }
     
     this.outputBuffers.get(projectId)!.push(output)
-    
-    // 如果没有正在运行的冲刷定时器，则启动一个
-    if (!this.bufferIntervals.has(projectId)) {
-      const interval = setInterval(() => {
-        this.flushBuffer(projectId)
-      }, this.BUFFER_FLUSH_INTERVAL)
-      this.bufferIntervals.set(projectId, interval)
+    this.scheduleBufferFlush(projectId)
+  }
+
+  /**
+   * Use a one-shot timer so idle processes do not keep waking up just to
+   * discover there is nothing new to flush.
+   */
+  private scheduleBufferFlush(projectId: string): void {
+    if (this.bufferTimers.has(projectId)) {
+      return
     }
+
+    const timer = setTimeout(() => {
+      this.bufferTimers.delete(projectId)
+      this.flushBuffer(projectId)
+    }, this.BUFFER_FLUSH_INTERVAL)
+
+    this.bufferTimers.set(projectId, timer)
   }
 
   /**
@@ -427,11 +437,11 @@ export class ProcessManager extends EventEmitter {
   /**
    * 停止缓冲区定时器
    */
-  private stopBufferInterval(projectId: string): void {
-    const interval = this.bufferIntervals.get(projectId)
-    if (interval) {
-      clearInterval(interval)
-      this.bufferIntervals.delete(projectId)
+  private stopBufferTimer(projectId: string): void {
+    const timer = this.bufferTimers.get(projectId)
+    if (timer) {
+      clearTimeout(timer)
+      this.bufferTimers.delete(projectId)
     }
   }
 

@@ -18,23 +18,71 @@ const isErrorLine = (line: string): boolean => {
   )
 }
 
+type OutputLineModel = {
+  text: string
+  searchText: string
+  isError: boolean
+}
+
+function createOutputLineModel(text: string): OutputLineModel {
+  return {
+    text,
+    searchText: text.toLowerCase(),
+    isError: isErrorLine(text),
+  }
+}
+
+function buildOutputLineModels(chunks: string[]): OutputLineModel[] {
+  const lines: OutputLineModel[] = []
+  let pendingLine = ''
+
+  for (const chunk of chunks) {
+    const normalizedChunk = chunk.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    const parts = normalizedChunk.split('\n')
+
+    if (parts.length === 1) {
+      pendingLine += parts[0]
+      continue
+    }
+
+    pendingLine += parts[0]
+    lines.push(createOutputLineModel(pendingLine))
+
+    for (let index = 1; index < parts.length - 1; index += 1) {
+      lines.push(createOutputLineModel(parts[index]))
+    }
+
+    pendingLine = parts[parts.length - 1]
+  }
+
+  if (pendingLine) {
+    lines.push(createOutputLineModel(pendingLine))
+  }
+
+  return lines
+}
+
 type OutputRowProps = {
-  lines: string[]
+  lines: OutputLineModel[]
 }
 
 const OutputRow = memo(({ ariaAttributes, index, style, lines }: RowComponentProps<OutputRowProps>) => {
   const line = lines[index]
-  const parts = line.split(URL_REGEX)
-  const lineIsError = isErrorLine(line)
+  const parts = line.text.split(URL_REGEX)
 
   return (
     <div
       {...ariaAttributes}
-      style={style}
-      className={`output-line ${lineIsError ? 'output-line-error' : ''}`}
+      style={{
+        ...style,
+        lineHeight: `${OUTPUT_ROW_HEIGHT}px`,
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
+      }}
+      className={`output-line ${line.isError ? 'output-line-error' : ''}`}
     >
       {parts.map((part, partIndex) => {
-        if (part.match(URL_REGEX)) {
+        if (partIndex % 2 === 1) {
           return (
             <a
               key={partIndex}
@@ -65,27 +113,36 @@ const OutputConsole: React.FC<OutputConsoleProps> = memo(({ projectId, serverSta
   const [onlyErrors, setOnlyErrors] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
 
-  const filteredOutput = useMemo(() => {
+  // Process output arrives in arbitrary chunks, so we normalize it once
+  // before filtering and virtualizing rows.
+  const outputLines = useMemo(() => {
     if (!serverState) {
       return []
     }
 
-    let lines = serverState.output
+    return buildOutputLineModels(serverState.output)
+  }, [serverState?.output])
 
-    if (onlyErrors) {
-      lines = lines.filter(isErrorLine)
-    }
+  const normalizedKeyword = useMemo(() => {
+    return searchKeyword.trim().toLowerCase()
+  }, [searchKeyword])
 
-    if (searchKeyword.trim()) {
-      const keyword = searchKeyword.trim().toLowerCase()
-      lines = lines.filter((line) => line.toLowerCase().includes(keyword))
-    }
+  const filteredOutput = useMemo(() => {
+    return outputLines.filter((line) => {
+      if (onlyErrors && !line.isError) {
+        return false
+      }
 
-    return lines
-  }, [onlyErrors, searchKeyword, serverState])
+      if (normalizedKeyword && !line.searchText.includes(normalizedKeyword)) {
+        return false
+      }
+
+      return true
+    })
+  }, [normalizedKeyword, onlyErrors, outputLines])
 
   useEffect(() => {
-    if (!listRef.current || filteredOutput.length === 0 || onlyErrors || searchKeyword) {
+    if (!listRef.current || filteredOutput.length === 0 || onlyErrors || normalizedKeyword) {
       return
     }
 
@@ -93,7 +150,7 @@ const OutputConsole: React.FC<OutputConsoleProps> = memo(({ projectId, serverSta
       align: 'end',
       index: filteredOutput.length - 1,
     })
-  }, [filteredOutput.length, onlyErrors, searchKeyword])
+  }, [filteredOutput.length, normalizedKeyword, onlyErrors])
 
   const handleToggleErrors = useCallback(() => {
     setOnlyErrors((previous) => !previous)
@@ -144,16 +201,16 @@ const OutputConsole: React.FC<OutputConsoleProps> = memo(({ projectId, serverSta
         </div>
       </div>
 
-      {(searchKeyword || onlyErrors) && (
+      {(normalizedKeyword || onlyErrors) && (
         <p className="output-filter-hint">
-          共 {filteredOutput.length} / {serverState.output.length} 条
+          共 {filteredOutput.length} / {outputLines.length} 条
         </p>
       )}
 
       <div className="output-console">
         {filteredOutput.length === 0 ? (
           <p className="output-empty">
-            {onlyErrors || searchKeyword ? '没有匹配的日志' : '// 等待输出...'}
+            {onlyErrors || normalizedKeyword ? '没有匹配的日志' : '// 等待输出...'}
           </p>
         ) : (
           <List

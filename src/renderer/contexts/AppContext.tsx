@@ -127,7 +127,6 @@ function appReducer(state: AppState, action: AppAction): AppState {
 // Context类型
 interface AppContextType {
   state: AppState
-  dispatch: React.Dispatch<AppAction>
   // 便捷方法
   loadProjects: (projects: ProjectHistoryEntry[]) => void
   addProject: (project: ProjectHistoryEntry) => void
@@ -136,6 +135,7 @@ interface AppContextType {
   setSelectedProject: (projectId: string | null) => void
   setSelectedFolder: (folder: string | null) => void
   updateServerState: (projectId: string, serverState: ServerState) => void
+  updateServerStateWith: (projectId: string, updater: (currentState: ServerState) => ServerState) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   clearError: () => void
@@ -184,6 +184,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     })
   }, [])
 
+  // Keep derived updates inside the provider so render code does not need raw dispatch access.
+  const updateServerStateWith = useCallback((projectId: string, updater: (currentState: ServerState) => ServerState) => {
+    dispatch({
+      type: 'UPDATE_SERVER_STATE_FUNCTIONAL',
+      payload: { projectId, updater }
+    })
+  }, [])
+
   const setLoading = useCallback((loading: boolean) => {
     dispatch({ type: 'SET_LOADING', payload: loading })
   }, [])
@@ -202,7 +210,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
   const contextValue = useMemo<AppContextType>(() => ({
     state,
-    dispatch,
     loadProjects,
     addProject,
     removeProject,
@@ -210,13 +217,13 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     setSelectedProject,
     setSelectedFolder,
     updateServerState,
+    updateServerStateWith,
     setLoading,
     setError,
     clearError,
     getServerState
   }), [
     state,
-    dispatch,
     loadProjects,
     addProject,
     removeProject,
@@ -224,6 +231,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     setSelectedProject,
     setSelectedFolder,
     updateServerState,
+    updateServerStateWith,
     setLoading,
     setError,
     clearError,

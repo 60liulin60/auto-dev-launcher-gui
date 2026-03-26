@@ -434,9 +434,11 @@
 }
 
 .output-line {
-  margin-bottom: 4px;
-  line-height: 1.6;
-  word-wrap: break-word;
+  margin-bottom: 0;
+  line-height: 24px;
+  white-space: nowrap;
+  word-break: normal;
+  overflow: hidden;
   animation: fadeIn 0.3s ease;
 }
 

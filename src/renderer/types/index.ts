@@ -4,12 +4,15 @@
 
 import { ProjectHistoryEntry, ServerStatus } from '../../shared/types'
 
+export type { ProjectHistoryEntry, ServerStatus }
+
 /**
  * 服务器状态信息
  */
 export interface ServerState {
   status: ServerStatus
   output: string[]
+  detectedUrl?: string
 }
 
 /**

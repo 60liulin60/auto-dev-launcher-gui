@@ -5,17 +5,12 @@ import { AppProvider } from './contexts/AppContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import './index.css'
 
-// 全局错误处理函数
+// Keep the crash screen minimal so the app still feels responsive on fatal errors.
 const handleGlobalError = (error: Error, errorInfo: React.ErrorInfo) => {
-  // 在开发环境中输出详细信息
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.error('Global error caught by ErrorBoundary:', error)
     console.error('Error info:', errorInfo)
   }
-
-  // 在生产环境中可以发送错误报告
-  // TODO: 实现错误报告功能
-  // reportErrorToService(error, errorInfo)
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -35,8 +30,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           justifyContent: 'center'
         }}>
           <div>
-            <h1 style={{ color: '#ff6b6b' }}>🚨 应用程序崩溃</h1>
-            <p>请重启应用程序或联系技术支持</p>
+            <h1 style={{ color: '#ff6b6b' }}>🚨 应用崩溃</h1>
+            <p>请重启应用程序或联系技术支持。</p>
           </div>
         </div>
       }

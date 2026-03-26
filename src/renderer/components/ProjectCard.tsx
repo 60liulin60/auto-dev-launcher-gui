@@ -1,5 +1,6 @@
 import React, { memo } from 'react'
 import { ProjectCardProps, ServerStatus } from '../types'
+import { desktop } from '../lib/desktop'
 
 const ProjectCard: React.FC<ProjectCardProps> = memo(({
   project,
@@ -32,6 +33,7 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
   }
 
   const isRunning = serverState.status === 'running' || serverState.status === 'starting'
+  const detectedUrl = serverState.detectedUrl
 
   return (
     <div
@@ -52,12 +54,26 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
         <p className="project-time">
           最后启动: {new Date(project.lastLaunched).toLocaleString()}
         </p>
+        {detectedUrl && isRunning && (
+          <a
+            className="project-url-link"
+            href="#"
+            title={`在浏览器中打开 ${detectedUrl}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              event.preventDefault()
+              desktop.openInExplorer(detectedUrl).catch(console.error)
+            }}
+          >
+            🌐 {detectedUrl}
+          </a>
+        )}
       </div>
       <div className="project-actions">
         {!isRunning ? (
           <button
-            onClick={(e) => {
-              e.stopPropagation()
+            onClick={(event) => {
+              event.stopPropagation()
               onLaunch(project)
             }}
             className="btn-success"
@@ -66,8 +82,8 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
           </button>
         ) : (
           <button
-            onClick={(e) => {
-              e.stopPropagation()
+            onClick={(event) => {
+              event.stopPropagation()
               onStop(project.id)
             }}
             className="btn-warning"
@@ -76,8 +92,8 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
           </button>
         )}
         <button
-          onClick={(e) => {
-            e.stopPropagation()
+          onClick={(event) => {
+            event.stopPropagation()
             onOpenInExplorer(project.path)
           }}
           className="btn-secondary"
@@ -85,8 +101,8 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
           📂 打开
         </button>
         <button
-          onClick={(e) => {
-            e.stopPropagation()
+          onClick={(event) => {
+            event.stopPropagation()
             onRemove(project.id)
           }}
           className="btn-danger"

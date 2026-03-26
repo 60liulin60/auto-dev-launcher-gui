@@ -12,7 +12,6 @@ const ProjectList: React.FC<ProjectListProps> = memo(({
   onProjectOpen,
   onProjectRemove
 }) => {
-  // 直接使用传入的 serverStates，而不是从 Context 获取
   const getServerState = (projectId: string): ServerState => {
     return serverStates.get(projectId) || { status: 'idle', output: [] }
   }
@@ -21,7 +20,7 @@ const ProjectList: React.FC<ProjectListProps> = memo(({
     return (
       <div className="projects-section">
         <h2>项目列表</h2>
-        <p className="empty-message">// 暂无项目，请选择一个文件夹开始</p>
+        <p className="empty-message">// 暂无项目，请先选择一个目录</p>
       </div>
     )
   }

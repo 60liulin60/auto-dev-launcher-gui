@@ -6,9 +6,11 @@ import { ProjectHistoryEntry } from '../shared/types'
 import Header from './components/Header'
 import ProjectList from './components/ProjectList'
 import OutputConsole from './components/OutputConsole'
+import { desktop } from './lib/desktop'
 
 const MAX_OUTPUT_CHUNKS = 100
-const SERVER_STOP_SETTLE_DELAY = 2000
+const SERVER_STOP_POLL_INTERVAL_MS = 150
+const SERVER_STOP_TIMEOUT_MS = 10_000
 
 // Avoid allocating a large intermediate array on every flush when logs are noisy.
 function mergeOutputChunks(currentOutput: string[], incomingOutput: string[]): string[] {
@@ -29,8 +31,37 @@ function createIdleServerState(): ServerState {
   return { status: 'idle', output: [] }
 }
 
+function createProjectId(projectPath: string): string {
+  return btoa(encodeURIComponent(projectPath))
+}
+
+function getProjectName(projectPath: string, fallbackName?: string): string {
+  if (fallbackName && fallbackName.trim().length > 0) {
+    return fallbackName
+  }
+
+  const segments = projectPath.split(/[/\\]/)
+  return segments[segments.length - 1] || 'Unknown'
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return String(error)
+}
+
 function isServerActive(status: ServerStatus): boolean {
   return status === 'running' || status === 'starting'
+}
+
+function normalizeStoppedStatus(status: ServerStatus): ServerStatus {
+  return status === 'idle' ? 'stopped' : status
+}
+
+function sleep(durationMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, durationMs))
 }
 
 function App() {
@@ -104,23 +135,82 @@ function App() {
     return stateRef.current.serverStates.get(projectId) || createIdleServerState()
   }, [])
 
-  // Reuse the same bounded-output policy for lifecycle messages and log chunks.
-  const pushLifecycleMessage = useCallback((projectId: string, status: ServerStatus, message: string) => {
+  // Append lifecycle text without lying about the current process state.
+  const appendOutputMessage = useCallback((projectId: string, message: string) => {
     const currentState = getLatestServerState(projectId)
 
     updateServerState(projectId, {
       ...currentState,
-      status,
       output: mergeOutputChunks(currentState.output, [message])
     })
   }, [getLatestServerState, updateServerState])
 
-  // Electron IPC listeners do not expose unsubscribe hooks here, so setup must stay idempotent.
-  const isListenerSetupRef = useRef(false)
+  const waitForProjectStop = useCallback(async (projectId: string): Promise<ServerStatus> => {
+    const deadline = Date.now() + SERVER_STOP_TIMEOUT_MS
+    let latestStatus = getLatestServerState(projectId).status
+
+    while (Date.now() <= deadline) {
+      try {
+        latestStatus = await desktop.getServerStatus(projectId)
+      } catch (error) {
+        latestStatus = getLatestServerState(projectId).status
+
+        if (!isServerActive(latestStatus)) {
+          return normalizeStoppedStatus(latestStatus)
+        }
+
+        throw error
+      }
+
+      if (!isServerActive(latestStatus)) {
+        return normalizeStoppedStatus(latestStatus)
+      }
+
+      await sleep(SERVER_STOP_POLL_INTERVAL_MS)
+    }
+
+    throw new Error('Server stop timed out. Please try again.')
+  }, [getLatestServerState])
+
+  const stopProjectAndWait = useCallback(async (
+    projectId: string,
+    pendingMessage: string,
+  ): Promise<ServerStatus> => {
+    const currentState = getLatestServerState(projectId)
+
+    if (!isServerActive(currentState.status)) {
+      return normalizeStoppedStatus(currentState.status)
+    }
+
+    if (stoppingProjectsRef.current.has(projectId)) {
+      return waitForProjectStop(projectId)
+    }
+
+    stoppingProjectsRef.current.add(projectId)
+    appendOutputMessage(projectId, pendingMessage)
+
+    try {
+      try {
+        await desktop.stopServer(projectId)
+      } catch (error) {
+        const latestStatus = getLatestServerState(projectId).status
+
+        if (isServerActive(latestStatus)) {
+          throw error
+        }
+      }
+
+      const finalStatus = await waitForProjectStop(projectId)
+      applyServerStatus(projectId, finalStatus)
+      return finalStatus
+    } finally {
+      stoppingProjectsRef.current.delete(projectId)
+    }
+  }, [appendOutputMessage, applyServerStatus, getLatestServerState, waitForProjectStop])
 
   const loadHistory = useCallback(async () => {
     try {
-      const history = await window.electronAPI.loadHistory()
+      const history = await desktop.loadHistory()
       loadProjects(history)
     } catch (error) {
       console.error('Failed to load history:', error)
@@ -128,9 +218,8 @@ function App() {
   }, [loadProjects])
 
   useEffect(() => {
-    if (isListenerSetupRef.current) {
-      return
-    }
+    let isDisposed = false
+    let removeListeners: Array<() => void> = []
 
     // Buffer log chunks until the next paint to avoid a render per IPC event.
     const handleServerOutput = (projectId: string, output: string) => {
@@ -143,22 +232,34 @@ function App() {
       }
     }
 
-    const handleServerStatusChange = (projectId: string, status: string) => {
-      applyServerStatus(projectId, status as ServerStatus)
+    const handleServerStatusChange = (projectId: string, status: ServerStatus) => {
+      applyServerStatus(projectId, status)
     }
 
     const handleServerUrlDetected = (projectId: string, url: string) => {
       applyDetectedUrl(projectId, url)
     }
 
-    window.electronAPI.onServerOutput(handleServerOutput)
-    window.electronAPI.onServerStatusChange(handleServerStatusChange)
-    window.electronAPI.onServerUrlDetected(handleServerUrlDetected)
+    void (async () => {
+      const nextRemoveListeners = await Promise.all([
+        desktop.onServerOutput(handleServerOutput),
+        desktop.onServerStatusChange(handleServerStatusChange),
+        desktop.onServerUrlDetected(handleServerUrlDetected),
+      ])
 
-    isListenerSetupRef.current = true
-    loadHistory()
+      if (isDisposed) {
+        nextRemoveListeners.forEach((removeListener) => removeListener())
+        return
+      }
+
+      removeListeners = nextRemoveListeners
+      await loadHistory()
+    })()
 
     return () => {
+      isDisposed = true
+      removeListeners.forEach((removeListener) => removeListener())
+
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current)
       }
@@ -167,26 +268,26 @@ function App() {
 
   const handleSelectFolder = useCallback(async () => {
     try {
-      const folder = await window.electronAPI.selectFolder()
+      const folder = await desktop.selectFolder()
       if (folder) {
         setSelectedFolder(folder)
 
         try {
-          const config = await window.electronAPI.loadConfig(folder)
-          const projectId = btoa(encodeURIComponent(folder))
+          const config = await desktop.loadConfig(folder)
+          const projectId = createProjectId(folder)
 
-          await window.electronAPI.addToHistory({
+          await desktop.addToHistory({
             id: projectId,
-            name: config.name || folder.split('\\').pop() || folder.split('/').pop() || 'Unknown',
+            name: getProjectName(folder, config.name),
             path: folder,
             lastLaunched: new Date(),
             config,
           })
 
           await loadHistory()
-        } catch (error: any) {
+        } catch (error) {
           console.error('Failed to load config:', error)
-          alert(`无法加载项目配置:\n${error.message || error}\n\n请确保项目文件夹中包含 package.json 文件`)
+          alert('Failed to load project config:\n' + getErrorMessage(error) + '\n\nMake sure the folder contains dev-config.json or package.json.')
         }
       }
     } catch (error) {
@@ -205,15 +306,17 @@ function App() {
 
     try {
       updateServerState(project.id, { status: 'starting', output: [] })
-      await window.electronAPI.startServer(project.id, project.path, project.config)
+      await desktop.startServer(project.id, project.path, project.config)
       setSelectedProject(project.id)
-    } catch (error: any) {
+    } catch (error) {
+      const errorMessage = getErrorMessage(error)
+
       console.error('[App] Failed to start server:', error)
-      alert(`启动失败: ${error.message || error}`)
+      alert('Start failed: ' + errorMessage)
 
       updateServerState(project.id, {
         status: 'error',
-        output: [`错误: ${error.message || error}`]
+        output: ['Error: ' + errorMessage]
       })
     } finally {
       isLaunchingRef.current = false
@@ -221,51 +324,58 @@ function App() {
   }, [setSelectedProject, updateServerState])
 
   const handleStopProject = useCallback((projectId: string) => {
-    if (stoppingProjectsRef.current.has(projectId)) {
-      return
-    }
-
-    stoppingProjectsRef.current.add(projectId)
-    pushLifecycleMessage(projectId, 'stopped', '正在停止服务器...')
-
-    window.electronAPI.stopServer(projectId)
-      .catch((error: any) => {
+    void stopProjectAndWait(projectId, 'Stopping server...')
+      .catch((error) => {
         console.error('[App] Failed to stop server:', error)
-        pushLifecycleMessage(projectId, 'running', `停止失败: ${error.message || error}`)
+        appendOutputMessage(projectId, 'Stop failed: ' + getErrorMessage(error))
       })
-      .finally(() => {
-        stoppingProjectsRef.current.delete(projectId)
-      })
-  }, [pushLifecycleMessage])
+  }, [appendOutputMessage, stopProjectAndWait])
 
   const handleOpenInExplorer = useCallback(async (path: string) => {
     try {
-      await window.electronAPI.openInExplorer(path)
+      await desktop.openInExplorer(path)
     } catch (error) {
       console.error('Failed to open in explorer:', error)
     }
   }, [])
 
   const handleRemoveFromHistory = useCallback(async (projectId: string) => {
-    if (!confirm('确定要从历史记录中删除此项目吗？')) {
+    const serverState = getLatestServerState(projectId)
+    const needsStopBeforeDelete = isServerActive(serverState.status)
+    const confirmMessage = needsStopBeforeDelete
+      ? 'The project is still running. Confirm to stop it first, then remove it from history.'
+      : 'Remove this project from history?'
+
+    let confirmed = false
+
+    try {
+      confirmed = await desktop.confirm(confirmMessage, 'Remove project')
+    } catch (error) {
+      console.error('[App] Failed to open remove confirmation dialog:', error)
+      alert('Failed to open confirmation dialog: ' + getErrorMessage(error))
+      return
+    }
+
+    if (!confirmed) {
       return
     }
 
     try {
-      const serverState = getLatestServerState(projectId)
-
-      if (isServerActive(serverState.status)) {
+      if (needsStopBeforeDelete) {
         try {
-          pushLifecycleMessage(projectId, 'stopped', '正在停止服务器以删除项目...')
-          await window.electronAPI.stopServer(projectId)
-          await new Promise((resolve) => setTimeout(resolve, SERVER_STOP_SETTLE_DELAY))
+          await stopProjectAndWait(projectId, 'Stopping server before removal...')
         } catch (error) {
           console.error('[App] Failed to stop server before removal:', error)
-          alert(`停止服务器失败: ${error}\n\n将继续删除项目,但端口可能仍被占用。`)
+          alert(
+            'Failed to stop server: ' +
+            getErrorMessage(error) +
+            '\n\nProject will not be removed until it is fully stopped.'
+          )
+          return
         }
       }
 
-      await window.electronAPI.removeFromHistory(projectId)
+      await desktop.removeFromHistory(projectId)
       await loadHistory()
 
       if (stateRef.current.selectedProjectId === projectId) {
@@ -273,9 +383,9 @@ function App() {
       }
     } catch (error) {
       console.error('[App] Failed to remove from history:', error)
-      alert(`删除失败: ${error}`)
+      alert('Remove failed: ' + getErrorMessage(error))
     }
-  }, [getLatestServerState, loadHistory, pushLifecycleMessage, setSelectedProject])
+  }, [getLatestServerState, loadHistory, setSelectedProject, stopProjectAndWait])
 
   const selectedServerState = useMemo(() => {
     if (!state.selectedProjectId) {
@@ -292,7 +402,7 @@ function App() {
       <main className="main">
         {state.selectedFolder && (
           <div className="selected-folder">
-            <p>已选择: {state.selectedFolder}</p>
+            <p>当前目录：{state.selectedFolder}</p>
           </div>
         )}
 

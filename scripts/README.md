@@ -1,30 +1,34 @@
-# 构建脚本
+# 脚本说明
 
-## clean.js
+## `clean.js`
 
-清理打包输出目录 (`release/`)。
+清理当前仓库的构建产物：
 
-### 使用方法
+- `dist/`
+- `release/`
+- `release-final/`
+- `src-tauri/target/release/bundle/`
+
+执行方式：
 
 ```bash
-npm run clean
+pnpm run clean
 ```
 
-### 功能
+## `verify-icon.js`
 
-- 删除 `release/` 目录及其所有内容
-- 如果目录不存在,显示提示信息
-- 如果文件被占用,显示警告并退出
+校验 Tauri 打包所需的图标资源与配置：
 
-### 自动执行
+- `src-tauri/tauri.conf.json`
+- `src-tauri/icons/icon.png`
+- `src-tauri/icons/icon.ico`
 
-在执行打包命令时会自动运行:
-- `npm run package` - 打包前自动清理
-- `npm run package:win` - Windows打包前自动清理
+执行方式：
 
-### 注意事项
+```bash
+pnpm run verify:icon
+```
 
-如果清理失败(文件被占用):
-1. 关闭所有正在运行的应用实例
-2. 手动删除 `release/` 目录
-3. 重新运行打包命令
+## `generate-icon.js`
+
+用于生成或更新应用图标资源，供 `build/` 与 `src-tauri/icons/` 复用。

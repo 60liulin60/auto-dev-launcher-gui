@@ -1,5 +1,6 @@
 import React, { memo } from 'react'
 import { ProjectCardProps, ServerStatus } from '../types'
+import { desktop } from '../lib/desktop'
 
 const ProjectCard: React.FC<ProjectCardProps> = memo(({
   project,
@@ -13,21 +14,31 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
 }) => {
   const getStatusText = (status: ServerStatus) => {
     switch (status) {
-      case 'idle': return '未启动'
-      case 'starting': return '启动中'
-      case 'running': return '运行中'
-      case 'stopped': return '已停止'
-      case 'error': return '错误'
+      case 'idle':
+        return '未启动'
+      case 'starting':
+        return '启动中'
+      case 'running':
+        return '运行中'
+      case 'stopped':
+        return '已停止'
+      case 'error':
+        return '错误'
     }
   }
 
   const getStatusColor = (status: ServerStatus) => {
     switch (status) {
-      case 'idle': return '#a8b5c9'
-      case 'starting': return '#d4a574'
-      case 'running': return '#7eb89f'
-      case 'stopped': return '#a8b5c9'
-      case 'error': return '#d47d7d'
+      case 'idle':
+        return '#a7b5cb'
+      case 'starting':
+        return '#e3b05f'
+      case 'running':
+        return '#67c28c'
+      case 'stopped':
+        return '#a7b5cb'
+      case 'error':
+        return '#e57c7c'
     }
   }
 
@@ -51,62 +62,62 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
         </div>
         <p className="project-path">{project.path}</p>
         <p className="project-time">
-          最后启动: {new Date(project.lastLaunched).toLocaleString()}
+          上次启动：{new Date(project.lastLaunched).toLocaleString()}
         </p>
         {detectedUrl && isRunning && (
           <a
             className="project-url-link"
             href="#"
-            title={`在浏览器中打开 ${detectedUrl}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              e.preventDefault()
-              window.electronAPI.openInExplorer(detectedUrl).catch(console.error)
+            title={`打开 ${detectedUrl}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              event.preventDefault()
+              desktop.openInExplorer(detectedUrl).catch(console.error)
             }}
           >
-            🌐 {detectedUrl}
+            {detectedUrl}
           </a>
         )}
       </div>
       <div className="project-actions">
         {!isRunning ? (
           <button
-            onClick={(e) => {
-              e.stopPropagation()
+            onClick={(event) => {
+              event.stopPropagation()
               onLaunch(project)
             }}
             className="btn-success"
           >
-            ▶ 启动
+            启动
           </button>
         ) : (
           <button
-            onClick={(e) => {
-              e.stopPropagation()
+            onClick={(event) => {
+              event.stopPropagation()
               onStop(project.id)
             }}
             className="btn-warning"
           >
-            ⏹ 停止
+            停止
           </button>
         )}
         <button
-          onClick={(e) => {
-            e.stopPropagation()
+          onClick={(event) => {
+            event.stopPropagation()
             onOpenInExplorer(project.path)
           }}
           className="btn-secondary"
         >
-          📂 打开
+          打开
         </button>
         <button
-          onClick={(e) => {
-            e.stopPropagation()
+          onClick={(event) => {
+            event.stopPropagation()
             onRemove(project.id)
           }}
           className="btn-danger"
         >
-          🗑 删除
+          移除
         </button>
       </div>
     </div>

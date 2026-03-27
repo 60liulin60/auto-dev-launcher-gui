@@ -9,6 +9,9 @@ export default defineConfig({
     outDir: 'dist/renderer',
     emptyOutDir: true,
   },
+  test: {
+    exclude: ['dist/**', 'node_modules/**'],
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

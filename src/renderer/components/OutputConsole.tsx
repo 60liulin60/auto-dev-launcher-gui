@@ -1,9 +1,10 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { List, type ListImperativeAPI, type RowComponentProps } from 'react-window'
 import { OutputConsoleProps } from '../types'
+import { desktop } from '../lib/desktop'
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g
-const OUTPUT_HEIGHT = 400
+const OUTPUT_DEFAULT_HEIGHT = 400
 const OUTPUT_ROW_HEIGHT = 24
 
 const isErrorLine = (line: string): boolean => {
@@ -11,7 +12,6 @@ const isErrorLine = (line: string): boolean => {
   return (
     lower.includes('error') ||
     lower.includes('err:') ||
-    lower.includes('✗') ||
     lower.includes('failed') ||
     lower.includes('exception') ||
     lower.includes('uncaught')
@@ -75,9 +75,11 @@ const OutputRow = memo(({ ariaAttributes, index, style, lines }: RowComponentPro
       {...ariaAttributes}
       style={{
         ...style,
+        boxSizing: 'border-box',
         lineHeight: `${OUTPUT_ROW_HEIGHT}px`,
         overflow: 'hidden',
-        whiteSpace: 'nowrap',
+        paddingRight: '12px',
+        whiteSpace: 'pre',
       }}
       className={`output-line ${line.isError ? 'output-line-error' : ''}`}
     >
@@ -90,7 +92,7 @@ const OutputRow = memo(({ ariaAttributes, index, style, lines }: RowComponentPro
               className="output-link"
               onClick={(event) => {
                 event.preventDefault()
-                window.electronAPI.openInExplorer(part).catch((error) => {
+                desktop.openInExplorer(part).catch((error) => {
                   console.error('Failed to open URL:', error)
                 })
               }}
@@ -113,8 +115,6 @@ const OutputConsole: React.FC<OutputConsoleProps> = memo(({ projectId, serverSta
   const [onlyErrors, setOnlyErrors] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
 
-  // Process output arrives in arbitrary chunks, so we normalize it once
-  // before filtering and virtualizing rows.
   const outputLines = useMemo(() => {
     if (!serverState) {
       return []
@@ -148,9 +148,10 @@ const OutputConsole: React.FC<OutputConsoleProps> = memo(({ projectId, serverSta
 
     listRef.current.scrollToRow({
       align: 'end',
+      behavior: 'instant',
       index: filteredOutput.length - 1,
     })
-  }, [filteredOutput.length, normalizedKeyword, onlyErrors])
+  }, [filteredOutput.length, normalizedKeyword, onlyErrors, projectId])
 
   const handleToggleErrors = useCallback(() => {
     setOnlyErrors((previous) => !previous)
@@ -169,57 +170,70 @@ const OutputConsole: React.FC<OutputConsoleProps> = memo(({ projectId, serverSta
   }), [filteredOutput])
 
   if (!projectId || !serverState) {
-    return null
+    return (
+      <div className="output-section">
+        <div className="output-header">
+          <h2>日志</h2>
+        </div>
+        <div className="output-console">
+          <p className="output-empty">选择项目后显示日志</p>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="output-section">
       <div className="output-header">
-        <h2>服务器输出</h2>
+        <h2>日志</h2>
         <div className="output-controls">
           <div className="output-search">
             <input
               type="text"
-              placeholder="搜索日志..."
+              placeholder="搜索日志"
               value={searchKeyword}
               onChange={handleSearchChange}
               className="search-input"
             />
             {searchKeyword && (
-              <button className="search-clear" onClick={handleClearSearch} title="清除搜索">
-                ✕
+              <button className="search-clear" onClick={handleClearSearch} title="清空搜索">
+                清空
               </button>
             )}
           </div>
           <button
             className={`btn-filter ${onlyErrors ? 'active' : ''}`}
             onClick={handleToggleErrors}
-            title="仅显示错误行"
+            title="只看错误日志"
           >
-            ⚠ 仅显示错误
+            仅错误
           </button>
         </div>
       </div>
 
       {(normalizedKeyword || onlyErrors) && (
         <p className="output-filter-hint">
-          共 {filteredOutput.length} / {outputLines.length} 条
+          显示 {filteredOutput.length} / {outputLines.length} 条
         </p>
       )}
 
       <div className="output-console">
         {filteredOutput.length === 0 ? (
           <p className="output-empty">
-            {onlyErrors || normalizedKeyword ? '没有匹配的日志' : '// 等待输出...'}
+            {onlyErrors || normalizedKeyword ? '没有匹配的日志' : '等待日志输出'}
           </p>
         ) : (
           <List
+            key={projectId}
+            className="output-list"
+            defaultHeight={OUTPUT_DEFAULT_HEIGHT}
             listRef={listRef}
+            overscanCount={12}
             rowComponent={OutputRow}
             rowCount={filteredOutput.length}
             rowHeight={OUTPUT_ROW_HEIGHT}
             rowProps={rowProps}
-            style={{ height: OUTPUT_HEIGHT, width: '100%' }}
+            style={{ height: '100%', width: '100%' }}
           />
         )}
       </div>

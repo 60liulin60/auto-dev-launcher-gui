@@ -19,15 +19,15 @@ const ProjectList: React.FC<ProjectListProps> = memo(({
   if (projects.length === 0) {
     return (
       <div className="projects-section">
-        <h2>项目列表</h2>
-        <p className="empty-message">// 暂无项目，请先选择一个目录</p>
+        <h2>项目</h2>
+        <p className="empty-message">暂无项目，请先选择目录。</p>
       </div>
     )
   }
 
   return (
     <div className="projects-section">
-      <h2>项目列表</h2>
+      <h2>项目</h2>
       <div className="projects-list">
         {projects.map((project) => {
           const serverState = getServerState(project.id)

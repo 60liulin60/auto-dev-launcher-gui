@@ -1,4 +1,4 @@
-mod config;
+﻿mod config;
 mod process_manager;
 mod storage;
 mod types;
@@ -6,13 +6,18 @@ mod types;
 use config::{load_project_config, sanitize_path, validate_dev_config};
 use process_manager::ProcessManager;
 use storage::StorageManager;
-use tauri::{Manager, WindowEvent};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+use tauri::{Manager, Monitor, WindowEvent};
 use types::{AppSettings, DevConfig, ProjectHistoryEntry, ValidationResult, WindowBounds};
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+const DEFAULT_WINDOW_WIDTH: u32 = 1200;
+const DEFAULT_WINDOW_HEIGHT: u32 = 800;
+const MIN_WINDOW_WIDTH: u32 = 960;
+const MIN_WINDOW_HEIGHT: u32 = 640;
+const WINDOWS_HIDDEN_COORDINATE: i32 = -32000;
 
 struct AppState {
   storage: StorageManager,
@@ -123,7 +128,14 @@ pub fn run() {
       if let Some(window) = app.get_webview_window("main") {
         let state = app.state::<AppState>();
         let settings = state.storage.load_settings().unwrap_or_default();
-        apply_window_settings(&window, &settings);
+        let normalized_bounds = normalize_window_bounds_for_webview(&window, &settings.window_bounds);
+        apply_window_settings(&window, &normalized_bounds);
+
+        if window_bounds_differ(&settings.window_bounds, &normalized_bounds) {
+          let mut normalized_settings: AppSettings = settings.clone();
+          normalized_settings.window_bounds = normalized_bounds;
+          let _ = state.storage.save_settings(&normalized_settings);
+        }
       }
 
       Ok(())
@@ -169,8 +181,11 @@ pub fn run() {
     .expect("error while running tauri application");
 }
 
-fn apply_window_settings(window: &tauri::WebviewWindow, settings: &AppSettings) {
-  let bounds = &settings.window_bounds;
+fn apply_window_settings(window: &tauri::WebviewWindow, bounds: &WindowBounds) {
+  let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize::new(
+    MIN_WINDOW_WIDTH as f64,
+    MIN_WINDOW_HEIGHT as f64,
+  ))));
 
   let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
     bounds.width as f64,
@@ -182,19 +197,119 @@ fn apply_window_settings(window: &tauri::WebviewWindow, settings: &AppSettings) 
       x as f64,
       y as f64,
     )));
+  } else {
+    let _ = window.center();
   }
 }
 
 fn capture_window_bounds(window: &tauri::Window) -> Option<WindowBounds> {
-  let size = window.outer_size().ok()?;
-  let position = window.outer_position().ok();
+  if window.is_minimized().ok()? {
+    return None;
+  }
 
-  Some(WindowBounds {
+  let size = window.outer_size().ok()?;
+  if size.width < MIN_WINDOW_WIDTH || size.height < MIN_WINDOW_HEIGHT {
+    return None;
+  }
+
+  let position = window.outer_position().ok()?;
+  if !is_valid_window_coordinate(position.x) || !is_valid_window_coordinate(position.y) {
+    return None;
+  }
+
+  let bounds = WindowBounds {
     width: size.width,
     height: size.height,
-    x: position.map(|value| value.x),
-    y: position.map(|value| value.y),
+    x: Some(position.x),
+    y: Some(position.y),
+  };
+
+  if !window_bounds_intersect_any_monitor(window.available_monitors().ok(), &bounds) {
+    return None;
+  }
+
+  Some(bounds)
+}
+
+fn normalize_window_bounds_for_webview(
+  window: &tauri::WebviewWindow,
+  bounds: &WindowBounds,
+) -> WindowBounds {
+  let width = if bounds.width < MIN_WINDOW_WIDTH {
+    DEFAULT_WINDOW_WIDTH
+  } else {
+    bounds.width
+  };
+
+  let height = if bounds.height < MIN_WINDOW_HEIGHT {
+    DEFAULT_WINDOW_HEIGHT
+  } else {
+    bounds.height
+  };
+
+  let (x, y) = match (bounds.x, bounds.y) {
+    (Some(x), Some(y)) if is_valid_window_coordinate(x) && is_valid_window_coordinate(y) => {
+      let candidate = WindowBounds {
+        width,
+        height,
+        x: Some(x),
+        y: Some(y),
+      };
+
+      if window_bounds_intersect_any_monitor(window.available_monitors().ok(), &candidate) {
+        (Some(x), Some(y))
+      } else {
+        (None, None)
+      }
+    }
+    _ => (None, None),
+  };
+
+  WindowBounds {
+    width,
+    height,
+    x,
+    y,
+  }
+}
+
+fn window_bounds_intersect_any_monitor(monitors: Option<Vec<Monitor>>, bounds: &WindowBounds) -> bool {
+  let (Some(x), Some(y)) = (bounds.x, bounds.y) else {
+    return false;
+  };
+
+  let Some(monitors) = monitors else {
+    return true;
+  };
+
+  if monitors.is_empty() {
+    return true;
+  }
+
+  let left = x;
+  let top = y;
+  let right = x.saturating_add(bounds.width as i32);
+  let bottom = y.saturating_add(bounds.height as i32);
+
+  monitors.into_iter().any(|monitor| {
+    let monitor_left = monitor.position().x;
+    let monitor_top = monitor.position().y;
+    let monitor_right = monitor_left.saturating_add(monitor.size().width as i32);
+    let monitor_bottom = monitor_top.saturating_add(monitor.size().height as i32);
+
+    right > monitor_left
+      && left < monitor_right
+      && bottom > monitor_top
+      && top < monitor_bottom
   })
+}
+
+fn is_valid_window_coordinate(value: i32) -> bool {
+  value > WINDOWS_HIDDEN_COORDINATE
+}
+
+fn window_bounds_differ(left: &WindowBounds, right: &WindowBounds) -> bool {
+  left.width != right.width || left.height != right.height || left.x != right.x || left.y != right.y
 }
 
 fn open_url(url: &str) -> Result<(), String> {
@@ -205,7 +320,7 @@ fn open_url(url: &str) -> Result<(), String> {
     command
       .args(["/C", "start", "", url])
       .spawn()
-      .map_err(|error| format!("鏃犳硶鎵撳紑閾炬帴: {error}"))?;
+      .map_err(|error| format!("无法打开链接: {error}"))?;
     return Ok(());
   }
 
@@ -213,7 +328,7 @@ fn open_url(url: &str) -> Result<(), String> {
   std::process::Command::new(opener)
     .arg(url)
     .spawn()
-    .map_err(|error| format!("鏃犳硶鎵撳紑閾炬帴: {error}"))?;
+    .map_err(|error| format!("无法打开链接: {error}"))?;
 
   Ok(())
 }
@@ -223,7 +338,7 @@ fn open_path(path: &std::path::Path) -> Result<(), String> {
     std::process::Command::new("explorer")
       .arg(path)
       .spawn()
-      .map_err(|error| format!("鏃犳硶鎵撳紑璺緞: {error}"))?;
+      .map_err(|error| format!("无法打开路径: {error}"))?;
     return Ok(());
   }
 
@@ -231,7 +346,7 @@ fn open_path(path: &std::path::Path) -> Result<(), String> {
   std::process::Command::new(opener)
     .arg(path)
     .spawn()
-    .map_err(|error| format!("鏃犳硶鎵撳紑璺緞: {error}"))?;
+    .map_err(|error| format!("无法打开路径: {error}"))?;
 
   Ok(())
 }
@@ -242,4 +357,3 @@ fn current_timestamp_ms() -> u64 {
     .map(|duration| duration.as_millis() as u64)
     .unwrap_or_default()
 }
-

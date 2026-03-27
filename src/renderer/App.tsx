@@ -402,7 +402,7 @@ function App() {
       <main className="main">
         {state.selectedFolder && (
           <div className="selected-folder">
-            <p>Selected: {state.selectedFolder}</p>
+            <p>当前目录：{state.selectedFolder}</p>
           </div>
         )}
 

@@ -52,6 +52,10 @@ pub struct AppSettings {
   pub window_bounds: WindowBounds,
   pub theme: String,
   pub max_history_entries: u32,
+  #[serde(default)]
+  pub launch_on_startup: bool,
+  #[serde(default)]
+  pub close_to_tray_on_close: bool,
 }
 
 impl Default for AppSettings {
@@ -60,6 +64,8 @@ impl Default for AppSettings {
       window_bounds: WindowBounds::default(),
       theme: "system".to_string(),
       max_history_entries: 50,
+      launch_on_startup: false,
+      close_to_tray_on_close: false,
     }
   }
 }

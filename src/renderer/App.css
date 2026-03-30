@@ -47,9 +47,10 @@ input {
 
 .header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
   min-height: 64px;
   padding: 14px 22px;
   background: var(--bg-panel);
@@ -62,6 +63,26 @@ input {
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: 0.2px;
+}
+
+.header-settings {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+}
+
+.header-setting-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.header-setting-item input {
+  margin: 0;
 }
 
 .header .btn-primary {
@@ -102,6 +123,14 @@ input {
 
   .header h1 {
     font-size: 15px;
+  }
+
+  .header-settings {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .main {

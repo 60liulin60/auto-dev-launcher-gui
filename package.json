@@ -1,6 +1,6 @@
 {
   "name": "auto-dev-launcher-gui",
-  "version": "1.0.5",
+  "version": "2.0.0",
   "description": "Auto Dev Launcher GUI - Tauri Desktop",
   "repository": {
     "type": "git",

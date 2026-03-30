@@ -1,24 +1,32 @@
-# 开发服务器启动工具
+# 开发服务器启动工具（Auto Dev Launcher）
 
-> 基于 `Tauri 2 + React 19 + Rust` 的桌面应用，用于统一管理本地项目并启动开发服务器。
+基于 `Tauri 2 + React 19 + Rust` 的桌面应用，用于统一管理本地项目并一键启动开发服务。
 
 ![界面预览](docs/image.png)
 
-## 项目状态
+## 项目现状
 
-- 桌面端已经完全迁移到 `Tauri`
-- 旧的 `Electron` 主进程、`preload`、IPC 桥接和相关打包配置已经移除
+- 桌面端已迁移到 `Tauri`
 - 前端统一通过 `src/renderer/lib/desktop.ts` 调用桌面能力
-- Windows 发布版已处理额外控制台弹窗问题，并补充了启动失败兜底界面
+- 支持托盘、开机自启（Windows）、关闭窗口最小化到托盘
 
 ## 主要功能
 
-- 自动读取 `package.json` / `dev-config.json`
-- 自动识别包管理器，并在缺少 `node_modules` 时补装依赖
-- 管理多个项目的启动状态与历史记录
-- 实时展示日志，支持错误筛选、关键词搜索和本地地址点击打开
-- 删除项目时先确认，再停止运行中的项目，最后移除记录
-- 关闭应用前自动停止所有已启动项目
+- 自动读取项目配置（优先 `dev-config.json`，其次 `package.json`）
+- 无配置时自动生成启动命令（根据锁文件识别 `pnpm/yarn/npm`）
+- 启动项目时若缺少 `node_modules`，自动执行依赖安装
+- 管理多个项目的启动状态、停止状态与历史记录
+- 实时日志输出，支持错误筛选与关键字搜索
+- 自动识别本地 URL（如 `localhost:5173`）并可点击打开
+- 删除项目前会先确认；若项目运行中会先停止再删除
+- 退出应用时会先停止所有已启动项目再安全退出
+
+## 桌面行为设置
+
+- `开机自启`：Windows 登录后自动启动应用
+- `关闭时最小化到托盘`：关闭按钮不退出应用，只隐藏到系统托盘
+- 托盘左键：显示主窗口
+- 托盘右键菜单：`显示主窗口` / `退出`
 
 ## 技术栈
 
@@ -27,14 +35,15 @@
 - `Vite 7`
 - `Rust`
 - `TypeScript`
+- `Vitest`
 
 ## 开发环境
 
 - `Node.js 20+`
 - `pnpm`
-- `Rust` 与 `cargo`
+- `Rust`（含 `cargo`）
 
-如果 Windows 下执行 `pnpm tauri dev` 或 `pnpm tauri build` 时提示找不到 `cargo`，先把下面目录加入 `PATH`：
+如果在 Windows 下执行 `pnpm tauri dev` 或 `pnpm tauri build` 时提示找不到 `cargo`，先将以下目录加入 `PATH`：
 
 ```powershell
 $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
@@ -47,44 +56,80 @@ pnpm install
 pnpm run dev
 ```
 
-开发模式下，前端默认使用：
-
-- `http://127.0.0.1:4173`
+开发模式前端地址固定为：`http://127.0.0.1:4173`
 
 ## 常用命令
 
 ```bash
 pnpm install
 pnpm run dev
+pnpm run dev:web
+pnpm run test
 pnpm run build:web
-pnpm test
+pnpm run build
 pnpm run clean
 pnpm run package:win:nosign
 ```
 
-说明：
-
 - `pnpm run dev`：启动 Tauri 开发模式
-- `pnpm run build:web`：单独构建前端资源
-- `pnpm test`：运行前端测试
-- `pnpm run clean`：清理构建产物
-- `pnpm run package:win:nosign`：生成 Windows 安装包
+- `pnpm run dev:web`：仅启动前端开发服务（Vite）
+- `pnpm run test`：运行前端测试（Vitest）
+- `pnpm run build:web`：构建前端资源
+- `pnpm run build`：执行 Tauri 构建
+- `pnpm run clean`：清理构建产物与打包目录
+- `pnpm run package:win:nosign`：生成 Windows NSIS 包并整理到 `release-packages/`
+
+## 配置文件
+
+### `dev-config.json`（推荐）
+
+```json
+{
+  "name": "my-project",
+  "command": "pnpm run dev",
+  "cwd": "E:/workspace/my-project",
+  "port": 5173,
+  "env": {
+    "NODE_ENV": "development"
+  }
+}
+```
+
+字段说明：
+
+- `command`：启动命令（必填）
+- `cwd`：工作目录（必填）
+- `name`：项目显示名（可选）
+- `port`：端口（可选）
+- `env`：环境变量（可选）
+
+### 自动配置规则（无 `dev-config.json` 时）
+
+- 检测 `package.json` 的脚本优先级：`dev` > `start` > `serve` > `start`（兜底）
+- 根据锁文件识别包管理器：`pnpm-lock.yaml` > `yarn.lock` > `npm`
+- 生成命令形如：`pnpm run dev`
 
 ## 打包输出
 
-Windows 安装包默认输出到：
+默认 Tauri bundle 输出目录：
 
 ```text
-src-tauri/target/release/bundle/nsis/
+src-tauri/target/release/bundle/
 ```
 
-生成的主安装包文件名类似：
+打包后脚本会自动整理产物到：
 
 ```text
-开发服务器启动工具_1.0.5_x64-setup.exe
+release-packages/
 ```
 
-如果只想验证 Rust 侧是否可以正常编译，可使用：
+例如：
+
+```text
+Auto Dev Launcher_2.0.0_x64-setup.exe
+```
+
+只验证 Rust 侧编译（不产出安装包）：
 
 ```powershell
 $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
@@ -96,43 +141,44 @@ pnpm tauri build --debug --no-bundle
 ```text
 src/
   renderer/
-    components/          React 组件
-    contexts/            状态管理上下文
-    lib/desktop.ts       Tauri 桌面能力适配层
-    main.tsx             渲染入口与启动兜底
-  shared/types.ts        前后端共享类型
+    components/            React 组件（项目列表、日志面板等）
+    contexts/              应用状态管理
+    lib/desktop.ts         桌面能力调用封装（Tauri API）
+    App.tsx                主界面与交互逻辑
+    main.tsx               前端入口
+  shared/types.ts          前后端共享类型
+
 src-tauri/
-  src/config.rs          项目配置解析与校验
-  src/lib.rs             Tauri 命令注册与窗口生命周期
-  src/main.rs            桌面应用入口
-  src/process_manager.rs 进程启动、停止与日志采集
-  src/storage.rs         本地历史记录与设置持久化
-  src/types.rs           Rust 侧共享类型
-docs/
-  CHANGELOG.md
-  DESIGN_NOTES.md
-  TAURI_MIGRATION.md
+  src/config.rs            项目配置解析与校验
+  src/process_manager.rs   进程启动/停止、日志采集、URL 检测
+  src/storage.rs           历史与设置持久化
+  src/lib.rs               Tauri 命令注册、托盘与窗口行为
+  src/main.rs              桌面应用入口
+  tauri.conf.json          Tauri 构建与窗口配置
+
 scripts/
-  README.md
+  clean.js                     清理构建与打包目录
+  verify-icon.js               校验图标配置
+  collect-release-packages.js  整理打包产物
 ```
 
-## 排障
+## 故障排查
 
-### 1. `cargo` 找不到
+### 1. 找不到 `cargo`
 
-确认已安装 Rust，并把 `%USERPROFILE%\.cargo\bin` 加入系统环境变量或当前终端 `PATH`。
+确认已安装 Rust，并将 `%USERPROFILE%\.cargo\bin` 加入系统环境变量或当前终端 `PATH`。
 
-### 2. 开发端口冲突
+### 2. 端口 4173 被占用
 
-当前开发端口固定为 `4173`。如果本地已有程序占用该端口，请先释放端口后再执行 `pnpm run dev`。
+`dev:web` 固定使用 `127.0.0.1:4173` 且 `strictPort=true`。请先释放端口后再执行 `pnpm run dev`。
 
-### 3. 删除项目没有立即生效
+### 3. 删除项目后未立即生效
 
-应用会先尝试停止已启动项目，再执行删除；如果项目停止失败，会保留记录并提示错误。
+应用会先尝试停止项目进程，再执行删除；如果停止失败，会保留记录并提示错误。
 
 ## 相关文档
 
-- `docs/TAURI_MIGRATION.md`：迁移说明
-- `docs/CHANGELOG.md`：更新记录
-- `docs/DESIGN_NOTES.md`：设计说明
+- `docs/CHANGELOG.md`：版本更新记录
+- `docs/DESIGN_NOTES.md`：界面设计说明
+- `docs/TAURI_MIGRATION.md`：迁移记录
 - `scripts/README.md`：脚本说明

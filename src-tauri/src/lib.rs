@@ -1,4 +1,4 @@
-﻿mod config;
+mod config;
 mod process_manager;
 mod storage;
 mod types;
@@ -8,7 +8,15 @@ use process_manager::ProcessManager;
 use storage::StorageManager;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
-use tauri::{Manager, Monitor, WindowEvent};
+use std::sync::{
+  atomic::{AtomicBool, Ordering},
+  Arc,
+};
+use tauri::{
+  menu::{Menu, MenuItem},
+  tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+  Manager, Monitor, WindowEvent,
+};
 use types::{AppSettings, DevConfig, ProjectHistoryEntry, ValidationResult, WindowBounds};
 
 #[cfg(target_os = "windows")]
@@ -18,10 +26,18 @@ const DEFAULT_WINDOW_HEIGHT: u32 = 800;
 const MIN_WINDOW_WIDTH: u32 = 960;
 const MIN_WINDOW_HEIGHT: u32 = 640;
 const WINDOWS_HIDDEN_COORDINATE: i32 = -32000;
+const TRAY_ID: &str = "main-tray";
+const TRAY_MENU_SHOW_MAIN: &str = "tray_show_main";
+const TRAY_MENU_EXIT_APP: &str = "tray_exit_app";
+#[cfg(target_os = "windows")]
+const WINDOWS_RUN_KEY_PATH: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+#[cfg(target_os = "windows")]
+const WINDOWS_RUN_VALUE_NAME: &str = "AutoDevLauncher";
 
 struct AppState {
   storage: StorageManager,
   process_manager: ProcessManager,
+  exit_requested: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -114,6 +130,24 @@ fn check_path_exists(file_path: String) -> Result<bool, String> {
   Ok(sanitize_path(&file_path).map(|path| path.exists()).unwrap_or(false))
 }
 
+#[tauri::command]
+fn load_settings(state: tauri::State<AppState>) -> Result<AppSettings, String> {
+  let mut settings = state.storage.load_settings()?;
+  settings.launch_on_startup = is_launch_on_startup_enabled()?;
+  Ok(settings)
+}
+
+#[tauri::command]
+fn save_settings(
+  state: tauri::State<AppState>,
+  mut settings: AppSettings,
+) -> Result<AppSettings, String> {
+  set_launch_on_startup_enabled(settings.launch_on_startup)?;
+  settings.launch_on_startup = is_launch_on_startup_enabled()?;
+  state.storage.save_settings(&settings)?;
+  Ok(settings)
+}
+
 pub fn run() {
   let storage = StorageManager::new().expect("failed to create storage manager");
   let process_manager = ProcessManager::new();
@@ -123,20 +157,31 @@ pub fn run() {
     .manage(AppState {
       storage,
       process_manager,
+      exit_requested: Arc::new(AtomicBool::new(false)),
     })
     .setup(|app| {
+      if let Err(error) = setup_tray_icon(app) {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, error).into());
+      }
+
+      let state = app.state::<AppState>();
+      let mut settings = state.storage.load_settings().unwrap_or_default();
+
+      let _ = set_launch_on_startup_enabled(settings.launch_on_startup);
+      if let Ok(startup_enabled) = is_launch_on_startup_enabled() {
+        settings.launch_on_startup = startup_enabled;
+      }
+
       if let Some(window) = app.get_webview_window("main") {
-        let state = app.state::<AppState>();
-        let settings = state.storage.load_settings().unwrap_or_default();
         let normalized_bounds = normalize_window_bounds_for_webview(&window, &settings.window_bounds);
         apply_window_settings(&window, &normalized_bounds);
 
         if window_bounds_differ(&settings.window_bounds, &normalized_bounds) {
-          let mut normalized_settings: AppSettings = settings.clone();
-          normalized_settings.window_bounds = normalized_bounds;
-          let _ = state.storage.save_settings(&normalized_settings);
+          settings.window_bounds = normalized_bounds;
         }
       }
+
+      let _ = state.storage.save_settings(&settings);
 
       Ok(())
     })
@@ -150,17 +195,25 @@ pub fn run() {
         }
       }
       WindowEvent::CloseRequested { api, .. } => {
+        let state = window.state::<AppState>();
+
+        if state.exit_requested.load(Ordering::Acquire) {
+          return;
+        }
+
         api.prevent_close();
 
-        let state = window.state::<AppState>();
-        let manager = state.process_manager.clone();
-        let window = window.clone();
+        let settings = state.storage.load_settings().unwrap_or_default();
+        if settings.close_to_tray_on_close {
+          let _ = window.hide();
+          return;
+        }
 
-        std::thread::spawn(move || {
-          if manager.stop_all_servers().is_ok() {
-            let _ = window.destroy();
-          }
-        });
+        request_app_exit(
+          window.app_handle().clone(),
+          state.process_manager.clone(),
+          state.exit_requested.clone(),
+        );
       }
       _ => {}
     })
@@ -175,12 +228,177 @@ pub fn run() {
       remove_from_history,
       clear_history,
       open_in_explorer,
-      check_path_exists
+      check_path_exists,
+      load_settings,
+      save_settings
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
+fn setup_tray_icon(app: &tauri::App) -> Result<(), String> {
+  let show_main_item = MenuItem::with_id(app, TRAY_MENU_SHOW_MAIN, "显示主窗口", true, None::<&str>)
+    .map_err(|error| format!("创建托盘菜单失败: {error}"))?;
+  let exit_item = MenuItem::with_id(app, TRAY_MENU_EXIT_APP, "退出", true, None::<&str>)
+    .map_err(|error| format!("创建托盘菜单失败: {error}"))?;
 
+  let tray_menu = Menu::with_items(app, &[&show_main_item, &exit_item])
+    .map_err(|error| format!("创建托盘菜单失败: {error}"))?;
+
+  let mut tray_builder = TrayIconBuilder::with_id(TRAY_ID)
+    .menu(&tray_menu)
+    .show_menu_on_left_click(false)
+    .on_menu_event(|app, event| {
+      handle_tray_menu_event(app, event.id().as_ref());
+    })
+    .on_tray_icon_event(|tray, event| {
+      if let TrayIconEvent::Click {
+        button: MouseButton::Left,
+        button_state: MouseButtonState::Up,
+        ..
+      } = event
+      {
+        let _ = show_main_window(tray.app_handle());
+      }
+    });
+
+  if let Some(icon) = app.default_window_icon().cloned() {
+    tray_builder = tray_builder.icon(icon);
+  }
+
+  tray_builder
+    .build(app)
+    .map_err(|error| format!("创建托盘图标失败: {error}"))?;
+
+  Ok(())
+}
+
+fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &str) {
+  match menu_id {
+    TRAY_MENU_SHOW_MAIN => {
+      let _ = show_main_window(app);
+    }
+    TRAY_MENU_EXIT_APP => {
+      let state = app.state::<AppState>();
+      request_app_exit(
+        app.clone(),
+        state.process_manager.clone(),
+        state.exit_requested.clone(),
+      );
+    }
+    _ => {}
+  }
+}
+
+fn show_main_window(app: &tauri::AppHandle) -> Result<(), String> {
+  let Some(window) = app.get_webview_window("main") else {
+    return Ok(());
+  };
+
+  if window.is_minimized().unwrap_or(false) {
+    let _ = window.unminimize();
+  }
+
+  let _ = window.show();
+  let _ = window.set_focus();
+
+  Ok(())
+}
+
+fn request_app_exit(
+  app: tauri::AppHandle,
+  process_manager: ProcessManager,
+  exit_requested: Arc<AtomicBool>,
+) {
+  if exit_requested.swap(true, Ordering::AcqRel) {
+    return;
+  }
+
+  std::thread::spawn(move || {
+    let _ = process_manager.stop_all_servers();
+    app.exit(0);
+  });
+}
+
+fn set_launch_on_startup_enabled(enabled: bool) -> Result<(), String> {
+  #[cfg(target_os = "windows")]
+  {
+    if enabled {
+      let executable = std::env::current_exe().map_err(|error| format!("无法获取应用路径: {error}"))?;
+      let command_value = format!("\"{}\"", executable.display());
+
+      let mut command = std::process::Command::new("reg");
+      command.creation_flags(CREATE_NO_WINDOW);
+      let status = command
+        .args([
+          "add",
+          WINDOWS_RUN_KEY_PATH,
+          "/v",
+          WINDOWS_RUN_VALUE_NAME,
+          "/t",
+          "REG_SZ",
+          "/d",
+        ])
+        .arg(&command_value)
+        .arg("/f")
+        .status()
+        .map_err(|error| format!("设置开机自启失败: {error}"))?;
+
+      if !status.success() {
+        return Err("设置开机自启失败".to_string());
+      }
+
+      return Ok(());
+    }
+
+    if !is_launch_on_startup_enabled()? {
+      return Ok(());
+    }
+
+    let mut command = std::process::Command::new("reg");
+    command.creation_flags(CREATE_NO_WINDOW);
+    let status = command
+      .args([
+        "delete",
+        WINDOWS_RUN_KEY_PATH,
+        "/v",
+        WINDOWS_RUN_VALUE_NAME,
+        "/f",
+      ])
+      .status()
+      .map_err(|error| format!("取消开机自启失败: {error}"))?;
+
+    if !status.success() {
+      return Err("取消开机自启失败".to_string());
+    }
+
+    return Ok(());
+  }
+
+  #[cfg(not(target_os = "windows"))]
+  {
+    let _ = enabled;
+    Ok(())
+  }
+}
+
+fn is_launch_on_startup_enabled() -> Result<bool, String> {
+  #[cfg(target_os = "windows")]
+  {
+    let mut command = std::process::Command::new("reg");
+    command.creation_flags(CREATE_NO_WINDOW);
+    let output = command
+      .args(["query", WINDOWS_RUN_KEY_PATH, "/v", WINDOWS_RUN_VALUE_NAME])
+      .output()
+      .map_err(|error| format!("读取开机自启状态失败: {error}"))?;
+
+    return Ok(output.status.success());
+  }
+
+  #[cfg(not(target_os = "windows"))]
+  {
+    Ok(false)
+  }
+}
 fn apply_window_settings(window: &tauri::WebviewWindow, bounds: &WindowBounds) {
   let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize::new(
     MIN_WINDOW_WIDTH as f64,

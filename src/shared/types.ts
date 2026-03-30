@@ -37,6 +37,8 @@ export interface AppSettings {
   }
   theme: 'light' | 'dark' | 'system'
   maxHistoryEntries: number    // 保留的最大历史记录数
+  launchOnStartup: boolean
+  closeToTrayOnClose: boolean
 }
 
 /**

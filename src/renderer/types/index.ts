@@ -87,6 +87,10 @@ export interface OutputConsoleProps {
 export interface HeaderProps {
   onSelectFolder: () => void
   isLoading?: boolean
+  launchOnStartup: boolean
+  closeToTrayOnClose: boolean
+  onLaunchOnStartupChange: (enabled: boolean) => void
+  onCloseToTrayOnCloseChange: (enabled: boolean) => void
 }
 
 /**

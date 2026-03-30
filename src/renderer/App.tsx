@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { ServerState, ServerStatus } from './types'
 import { useApp } from './contexts/AppContext'
-import { ProjectHistoryEntry } from '../shared/types'
+import { AppSettings, ProjectHistoryEntry } from '../shared/types'
 import Header from './components/Header'
 import ProjectList from './components/ProjectList'
 import OutputConsole from './components/OutputConsole'
@@ -11,6 +11,16 @@ import { desktop } from './lib/desktop'
 const MAX_OUTPUT_CHUNKS = 100
 const SERVER_STOP_POLL_INTERVAL_MS = 150
 const SERVER_STOP_TIMEOUT_MS = 10_000
+const DEFAULT_APP_SETTINGS: AppSettings = {
+  windowBounds: {
+    width: 1200,
+    height: 800,
+  },
+  theme: 'system',
+  maxHistoryEntries: 50,
+  launchOnStartup: false,
+  closeToTrayOnClose: false,
+}
 
 // Avoid allocating a large intermediate array on every flush when logs are noisy.
 function mergeOutputChunks(currentOutput: string[], incomingOutput: string[]): string[] {
@@ -65,6 +75,8 @@ function sleep(durationMs: number): Promise<void> {
 }
 
 function App() {
+  const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS)
+
   const {
     state,
     loadProjects,
@@ -79,6 +91,7 @@ function App() {
   const stoppingProjectsRef = useRef<Set<string>>(new Set())
   const pendingOutputsRef = useRef<Map<string, string[]>>(new Map())
   const rafIdRef = useRef<number | null>(null)
+  const appSettingsRef = useRef(appSettings)
 
   // Keep the latest state reachable from async stop/remove flows.
   const stateRef = useRef(state)
@@ -86,6 +99,10 @@ function App() {
   useEffect(() => {
     stateRef.current = state
   }, [state])
+
+  useEffect(() => {
+    appSettingsRef.current = appSettings
+  }, [appSettings])
 
   // Batch IPC log bursts into one paint so the renderer stays responsive.
   const flushOutputs = useCallback(() => {
@@ -217,6 +234,50 @@ function App() {
     }
   }, [loadProjects])
 
+  const loadSettings = useCallback(async () => {
+    try {
+      const nextSettings = await desktop.loadSettings()
+      setAppSettings(nextSettings)
+    } catch (error) {
+      console.error('Failed to load settings:', error)
+    }
+  }, [])
+
+  const saveSettings = useCallback(async (
+    updater: (current: AppSettings) => AppSettings,
+    errorPrefix: string,
+  ) => {
+    const previousSettings = appSettingsRef.current
+    const nextSettings = updater(previousSettings)
+
+    appSettingsRef.current = nextSettings
+    setAppSettings(nextSettings)
+
+    try {
+      const persistedSettings = await desktop.saveSettings(nextSettings)
+      appSettingsRef.current = persistedSettings
+      setAppSettings(persistedSettings)
+    } catch (error) {
+      appSettingsRef.current = previousSettings
+      setAppSettings(previousSettings)
+      alert(`${errorPrefix}: ${getErrorMessage(error)}`)
+    }
+  }, [])
+
+  const handleLaunchOnStartupChange = useCallback((enabled: boolean) => {
+    void saveSettings(
+      (current) => ({ ...current, launchOnStartup: enabled }),
+      'Failed to update startup setting'
+    )
+  }, [saveSettings])
+
+  const handleCloseToTrayOnCloseChange = useCallback((enabled: boolean) => {
+    void saveSettings(
+      (current) => ({ ...current, closeToTrayOnClose: enabled }),
+      'Failed to update close behavior setting'
+    )
+  }, [saveSettings])
+
   useEffect(() => {
     let isDisposed = false
     let removeListeners: Array<() => void> = []
@@ -253,7 +314,7 @@ function App() {
       }
 
       removeListeners = nextRemoveListeners
-      await loadHistory()
+      await Promise.all([loadHistory(), loadSettings()])
     })()
 
     return () => {
@@ -264,7 +325,7 @@ function App() {
         cancelAnimationFrame(rafIdRef.current)
       }
     }
-  }, [applyDetectedUrl, applyServerStatus, loadHistory, flushOutputs])
+  }, [applyDetectedUrl, applyServerStatus, loadHistory, loadSettings, flushOutputs])
 
   const handleSelectFolder = useCallback(async () => {
     try {
@@ -397,7 +458,13 @@ function App() {
 
   return (
     <div className="app">
-      <Header onSelectFolder={handleSelectFolder} />
+      <Header
+        onSelectFolder={handleSelectFolder}
+        launchOnStartup={appSettings.launchOnStartup}
+        closeToTrayOnClose={appSettings.closeToTrayOnClose}
+        onLaunchOnStartupChange={handleLaunchOnStartupChange}
+        onCloseToTrayOnCloseChange={handleCloseToTrayOnCloseChange}
+      />
 
       <main className="main">
         {state.selectedFolder && (

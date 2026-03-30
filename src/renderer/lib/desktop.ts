@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { confirm as confirmDialog, open as openDialog } from '@tauri-apps/plugin-dialog'
 import type {
+  AppSettings,
   DevConfig,
   ProjectHistoryEntry,
   ServerProcess,
@@ -199,6 +200,31 @@ export const desktop = {
     }
 
     return invoke<void>('clear_history')
+  },
+
+  loadSettings(): Promise<AppSettings> {
+    if (!hasTauriRuntime()) {
+      return Promise.resolve({
+        windowBounds: {
+          width: 1200,
+          height: 800,
+        },
+        theme: 'system',
+        maxHistoryEntries: 50,
+        launchOnStartup: false,
+        closeToTrayOnClose: false,
+      })
+    }
+
+    return invoke<AppSettings>('load_settings')
+  },
+
+  saveSettings(settings: AppSettings): Promise<AppSettings> {
+    if (!hasTauriRuntime()) {
+      return Promise.resolve(settings)
+    }
+
+    return invoke<AppSettings>('save_settings', { settings })
   },
 
   openInExplorer(pathOrUrl: string): Promise<void> {

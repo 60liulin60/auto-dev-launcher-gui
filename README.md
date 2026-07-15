@@ -20,6 +20,7 @@
 - 自动识别本地 URL（如 `localhost:5173`）并可点击打开
 - 删除项目前会先确认；若项目运行中会先停止再删除
 - 退出应用时会先停止所有已启动项目再安全退出
+- 统一的应用内中文弹窗（提示 / 确认），支持 `ESC` 取消、`Enter` 确认、点击遮罩关闭
 
 ## 桌面行为设置
 
@@ -27,6 +28,7 @@
 - `关闭时最小化到托盘`：关闭按钮不退出应用，只隐藏到系统托盘
 - 托盘左键：显示主窗口
 - 托盘右键菜单：`显示主窗口` / `退出`
+- 原生标题栏使用应用主题深色（`#162033`）：仅 Windows 11（build 22000+）生效，旧系统自动降级为系统默认色
 
 ## 技术栈
 
@@ -141,8 +143,8 @@ pnpm tauri build --debug --no-bundle
 ```text
 src/
   renderer/
-    components/            React 组件（项目列表、日志面板等）
-    contexts/              应用状态管理
+    components/            React 组件（项目列表、日志面板、弹窗等）
+    contexts/              应用状态管理与弹窗上下文（AppContext / DialogContext）
     lib/desktop.ts         桌面能力调用封装（Tauri API）
     App.tsx                主界面与交互逻辑
     main.tsx               前端入口
@@ -152,7 +154,7 @@ src-tauri/
   src/config.rs            项目配置解析与校验
   src/process_manager.rs   进程启动/停止、日志采集、URL 检测
   src/storage.rs           历史与设置持久化
-  src/lib.rs               Tauri 命令注册、托盘与窗口行为
+  src/lib.rs               Tauri 命令注册、托盘、窗口行为与标题栏主题色
   src/main.rs              桌面应用入口
   tauri.conf.json          Tauri 构建与窗口配置
 

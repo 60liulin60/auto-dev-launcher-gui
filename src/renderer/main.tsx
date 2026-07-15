@@ -76,15 +76,17 @@ async function bootstrap() {
     throw new Error('Root element not found')
   }
 
-  const [appModule, providerModule, boundaryModule] = await Promise.all([
+  const [appModule, providerModule, boundaryModule, dialogModule] = await Promise.all([
     import('./App'),
     import('./contexts/AppContext'),
     import('./components/ErrorBoundary'),
+    import('./contexts/DialogContext'),
   ])
 
   const App = appModule.default
   const AppProvider = providerModule.AppProvider
   const ErrorBoundary = boundaryModule.default
+  const DialogProvider = dialogModule.DialogProvider
 
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
@@ -110,7 +112,9 @@ async function bootstrap() {
         }
       >
         <AppProvider>
-          <App />
+          <DialogProvider>
+            <App />
+          </DialogProvider>
         </AppProvider>
       </ErrorBoundary>
     </React.StrictMode>,

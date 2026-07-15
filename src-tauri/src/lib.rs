@@ -21,6 +21,10 @@ use types::{AppSettings, DevConfig, ProjectHistoryEntry, ValidationResult, Windo
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+// Native title bar color for Windows 11 (DWM caption), expressed as 0x00BBGGRR.
+// Matches the app theme panel color #162033 (R=0x16 G=0x20 B=0x33).
+#[cfg(target_os = "windows")]
+const TITLEBAR_CAPTION_COLOR: u32 = 0x0033_2016;
 const DEFAULT_WINDOW_WIDTH: u32 = 1200;
 const DEFAULT_WINDOW_HEIGHT: u32 = 800;
 const MIN_WINDOW_WIDTH: u32 = 960;
@@ -175,6 +179,7 @@ pub fn run() {
       if let Some(window) = app.get_webview_window("main") {
         let normalized_bounds = normalize_window_bounds_for_webview(&window, &settings.window_bounds);
         apply_window_settings(&window, &normalized_bounds);
+        apply_titlebar_color(&window);
 
         if window_bounds_differ(&settings.window_bounds, &normalized_bounds) {
           settings.window_bounds = normalized_bounds;
@@ -399,6 +404,35 @@ fn is_launch_on_startup_enabled() -> Result<bool, String> {
     Ok(false)
   }
 }
+// Paint the native title bar with the app theme color.
+// Only supported on Windows 11 (build 22000+); older systems ignore the attribute.
+#[cfg(target_os = "windows")]
+fn apply_titlebar_color(window: &tauri::WebviewWindow) {
+  use windows::Win32::Foundation::{COLORREF, HWND};
+  use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CAPTION_COLOR};
+
+  let Ok(handle) = window.hwnd() else {
+    return;
+  };
+
+  let hwnd = HWND(handle.0 as *mut std::ffi::c_void);
+  let color = COLORREF(TITLEBAR_CAPTION_COLOR);
+
+  // SAFETY: `hwnd` is a valid window handle owned by this app, and `color`
+  // outlives the call. Failure (e.g. Windows 10) is intentionally ignored.
+  unsafe {
+    let _ = DwmSetWindowAttribute(
+      hwnd,
+      DWMWA_CAPTION_COLOR,
+      &color as *const COLORREF as *const std::ffi::c_void,
+      std::mem::size_of::<COLORREF>() as u32,
+    );
+  }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_titlebar_color(_window: &tauri::WebviewWindow) {}
+
 fn apply_window_settings(window: &tauri::WebviewWindow, bounds: &WindowBounds) {
   let _ = window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize::new(
     MIN_WINDOW_WIDTH as f64,

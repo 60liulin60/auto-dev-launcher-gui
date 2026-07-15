@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { ServerState, ServerStatus } from './types'
 import { useApp } from './contexts/AppContext'
+import { useDialog } from './contexts/DialogContext'
 import { AppSettings, ProjectHistoryEntry } from '../shared/types'
 import Header from './components/Header'
 import ProjectList from './components/ProjectList'
@@ -86,6 +87,8 @@ function App() {
     updateServerStateWith,
     getServerState
   } = useApp()
+
+  const { showAlert, showConfirm } = useDialog()
 
   const isLaunchingRef = useRef(false)
   const stoppingProjectsRef = useRef<Set<string>>(new Set())
@@ -260,21 +263,21 @@ function App() {
     } catch (error) {
       appSettingsRef.current = previousSettings
       setAppSettings(previousSettings)
-      alert(`${errorPrefix}: ${getErrorMessage(error)}`)
+      void showAlert(`${errorPrefix}：${getErrorMessage(error)}`, { title: '保存设置失败', tone: 'danger' })
     }
-  }, [])
+  }, [showAlert])
 
   const handleLaunchOnStartupChange = useCallback((enabled: boolean) => {
     void saveSettings(
       (current) => ({ ...current, launchOnStartup: enabled }),
-      'Failed to update startup setting'
+      '更新开机自启设置失败'
     )
   }, [saveSettings])
 
   const handleCloseToTrayOnCloseChange = useCallback((enabled: boolean) => {
     void saveSettings(
       (current) => ({ ...current, closeToTrayOnClose: enabled }),
-      'Failed to update close behavior setting'
+      '更新关闭行为设置失败'
     )
   }, [saveSettings])
 
@@ -348,13 +351,16 @@ function App() {
           await loadHistory()
         } catch (error) {
           console.error('Failed to load config:', error)
-          alert('Failed to load project config:\n' + getErrorMessage(error) + '\n\nMake sure the folder contains dev-config.json or package.json.')
+          void showAlert(
+            '无法加载项目配置：\n' + getErrorMessage(error) + '\n\n请确认所选目录包含 dev-config.json 或 package.json。',
+            { title: '加载项目配置失败', tone: 'danger' }
+          )
         }
       }
     } catch (error) {
       console.error('Failed to select folder:', error)
     }
-  }, [loadHistory, setSelectedFolder])
+  }, [loadHistory, setSelectedFolder, showAlert])
 
   const handleLaunchProject = useCallback(async (project: ProjectHistoryEntry) => {
     stoppingProjectsRef.current.delete(project.id)
@@ -373,7 +379,7 @@ function App() {
       const errorMessage = getErrorMessage(error)
 
       console.error('[App] Failed to start server:', error)
-      alert('Start failed: ' + errorMessage)
+      void showAlert('启动失败：' + errorMessage, { title: '启动失败', tone: 'danger' })
 
       updateServerState(project.id, {
         status: 'error',
@@ -382,13 +388,13 @@ function App() {
     } finally {
       isLaunchingRef.current = false
     }
-  }, [setSelectedProject, updateServerState])
+  }, [setSelectedProject, updateServerState, showAlert])
 
   const handleStopProject = useCallback((projectId: string) => {
-    void stopProjectAndWait(projectId, 'Stopping server...')
+    void stopProjectAndWait(projectId, '正在停止服务...')
       .catch((error) => {
         console.error('[App] Failed to stop server:', error)
-        appendOutputMessage(projectId, 'Stop failed: ' + getErrorMessage(error))
+        appendOutputMessage(projectId, '停止失败：' + getErrorMessage(error))
       })
   }, [appendOutputMessage, stopProjectAndWait])
 
@@ -404,18 +410,14 @@ function App() {
     const serverState = getLatestServerState(projectId)
     const needsStopBeforeDelete = isServerActive(serverState.status)
     const confirmMessage = needsStopBeforeDelete
-      ? 'The project is still running. Confirm to stop it first, then remove it from history.'
-      : 'Remove this project from history?'
+      ? '该项目仍在运行。确认后将先停止服务,再从历史记录中移除。'
+      : '确定要从历史记录中移除该项目吗?'
 
-    let confirmed = false
-
-    try {
-      confirmed = await desktop.confirm(confirmMessage, 'Remove project')
-    } catch (error) {
-      console.error('[App] Failed to open remove confirmation dialog:', error)
-      alert('Failed to open confirmation dialog: ' + getErrorMessage(error))
-      return
-    }
+    const confirmed = await showConfirm(confirmMessage, {
+      title: '移除项目',
+      confirmText: '移除',
+      tone: 'danger',
+    })
 
     if (!confirmed) {
       return
@@ -424,13 +426,14 @@ function App() {
     try {
       if (needsStopBeforeDelete) {
         try {
-          await stopProjectAndWait(projectId, 'Stopping server before removal...')
+          await stopProjectAndWait(projectId, '移除前正在停止服务...')
         } catch (error) {
           console.error('[App] Failed to stop server before removal:', error)
-          alert(
-            'Failed to stop server: ' +
+          await showAlert(
+            '停止服务失败:' +
             getErrorMessage(error) +
-            '\n\nProject will not be removed until it is fully stopped.'
+            '\n\n服务未完全停止,项目暂不会被移除。',
+            { title: '移除失败', tone: 'danger' }
           )
           return
         }
@@ -444,9 +447,12 @@ function App() {
       }
     } catch (error) {
       console.error('[App] Failed to remove from history:', error)
-      alert('Remove failed: ' + getErrorMessage(error))
+      await showAlert('移除失败:' + getErrorMessage(error), {
+        title: '移除失败',
+        tone: 'danger',
+      })
     }
-  }, [getLatestServerState, loadHistory, setSelectedProject, stopProjectAndWait])
+  }, [getLatestServerState, loadHistory, setSelectedProject, stopProjectAndWait, showAlert, showConfirm])
 
   const selectedServerState = useMemo(() => {
     if (!state.selectedProjectId) {
@@ -454,7 +460,7 @@ function App() {
     }
 
     return getServerState(state.selectedProjectId)
-  }, [getServerState, state.selectedProjectId])
+  }, [getServerState, state.selectedProjectId, state.serverStates])
 
   return (
     <div className="app">

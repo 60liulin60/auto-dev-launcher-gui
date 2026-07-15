@@ -50,7 +50,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
         projects: [...state.projects, action.payload]
       }
 
-    case 'REMOVE_PROJECT':
+    case 'REMOVE_PROJECT': {
       const newServerStates = new Map(state.serverStates)
       newServerStates.delete(action.payload)
       return {
@@ -59,6 +59,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
         serverStates: newServerStates,
         selectedProjectId: state.selectedProjectId === action.payload ? null : state.selectedProjectId
       }
+    }
 
     case 'UPDATE_PROJECT':
       return {
@@ -82,15 +83,16 @@ function appReducer(state: AppState, action: AppAction): AppState {
         selectedFolder: action.payload
       }
 
-    case 'UPDATE_SERVER_STATE':
+    case 'UPDATE_SERVER_STATE': {
       const updatedServerStates = new Map(state.serverStates)
       updatedServerStates.set(action.payload.projectId, action.payload.state)
       return {
         ...state,
         serverStates: updatedServerStates
       }
+    }
 
-    case 'UPDATE_SERVER_STATE_FUNCTIONAL':
+    case 'UPDATE_SERVER_STATE_FUNCTIONAL': {
       const functionalUpdatedStates = new Map(state.serverStates)
       const currentState = functionalUpdatedStates.get(action.payload.projectId) || { status: 'idle' as ServerStatus, output: [] }
       const newState = action.payload.updater(currentState)
@@ -99,6 +101,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         serverStates: functionalUpdatedStates
       }
+    }
 
     case 'SET_LOADING':
       return {

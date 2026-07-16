@@ -81,10 +81,28 @@ OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the inst
 !else
   InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
 !endif # Default installing folder ($PROGRAMFILES is Program Files folder).
+
+# Reuse the previous install directory on reinstall. The installer writes
+# InstallLocation into the uninstall registry key (see wails.writeUninstaller
+# in wails_tools.nsh); this overrides the default InstallDir when that value
+# exists, so reinstalling does not prompt for the install location again.
 ShowInstDetails show # This will always show the installation details.
 
 Function .onInit
    !insertmacro wails.checkArchitecture
+
+   # Reuse the previous install directory on reinstall. InstallDirRegKey cannot
+   # be used here because the install location is written under the 64-bit
+   # registry view (SetRegView 64), which InstallDirRegKey does not honor.
+   # Read it explicitly under the 64-bit view and override $INSTDIR when found.
+   SetRegView 64
+   ClearErrors
+   ReadRegStr $R0 HKLM "${UNINST_KEY}" "InstallLocation"
+   ${IfNot} ${Errors}
+       ${If} $R0 != ""
+           StrCpy $INSTDIR $R0
+       ${EndIf}
+   ${EndIf}
 FunctionEnd
 
 Section
@@ -103,6 +121,12 @@ Section
     !insertmacro wails.associateCustomProtocols
 
     !insertmacro wails.writeUninstaller
+
+    # Persist the install location so a later reinstall can auto-detect it
+    # (read back via InstallDirRegKey above). Use the 64-bit registry view to
+    # match wails.writeUninstaller which runs under SetRegView 64.
+    SetRegView 64
+    WriteRegStr HKLM "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
 SectionEnd
 
 Section "uninstall"

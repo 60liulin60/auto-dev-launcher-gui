@@ -1,0 +1,15 @@
+# Wails 自动生成的 Go->JS 绑定（由 `wails build` / `wails dev` 再生）
+frontend/wailsjs/
+
+# 打包产物
+build/bin/
+
+# Wails 前端依赖缓存指纹（由 wails build 再生）
+frontend/package.json.md5
+
+# 图标为源文件，必须纳入版本控制。
+# 根 .gitignore 的 build/ 规则会误伤 desktop/build/ 下的图标，这里显式取消忽略。
+!build/
+!build/icon.ico
+!build/icon.png
+!build/appicon.png

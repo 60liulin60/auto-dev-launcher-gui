@@ -1,186 +1,91 @@
-# 开发服务器启动工具（Auto Dev Launcher）
+# Auto Dev Launcher — Go / Wails 重构版
 
-基于 `Tauri 2 + React 19 + Rust` 的桌面应用，用于统一管理本地项目并一键启动开发服务。
+独立于根目录 Tauri 树的迁移工作区（Reasonix Desktop 模式：Wails v2 + React + 纯 Go 内核）。
 
-![界面预览](docs/image.png)
+## 实现进度
 
-## 项目现状
+| 阶段 | 状态 | 说明 |
+|------|------|------|
+| Phase 0 脚手架 + IPC 契约 | 完成 | `docs/IPC_CONTRACT.md`、目录结构、前端拷贝 |
+| Phase 1 领域内核 | 完成 | types/config/storage/process/platform + 单测 |
+| Phase 2 Wails 绑定 + bridge | 完成 | `desktop/main.go`、`desktop/app.go`（14 个 IPC 方法 + 事件桥接）、`frontend/.../desktop.ts` 已切 Wails runtime |
+| Phase 3 托盘/自启 | 完成 | 开机自启（注册表）+ systray 托盘（显示主窗口/退出菜单）+ close-to-tray（`OnBeforeClose` 隐藏窗口）；图标嵌入 `build/icon.ico` |
+| Phase 4 打包回归 | 完成 | `go build ./...` / `go test ./...` / `go vet` 全绿，前端 vitest 5/5 通过，`wails build` 端到端产出可执行 EXE（11MB）+ NSIS 安装包（`auto-dev-launcher-amd64-installer.exe`，6.5MB）均已实测生成 |
 
-- 桌面端已迁移到 `Tauri`
-- 前端统一通过 `src/renderer/lib/desktop.ts` 调用桌面能力
-- 支持托盘、开机自启（Windows）、关闭窗口最小化到托盘
+## 结构
 
-## 主要功能
+```
+refactor/
+  go.mod
+  internal/{types,config,storage,process,platform}
+  desktop/                 # package main + Wails 绑定
+  desktop/frontend/        # React（bridge 已切 Wails）
+  docs/IPC_CONTRACT.md
+  scripts/build.ps1
+```
 
-- 自动读取项目配置（优先 `dev-config.json`，其次 `package.json`）
-- 无配置时自动生成启动命令（根据锁文件识别 `pnpm/yarn/npm`）
-- 启动项目时若缺少 `node_modules`，自动执行依赖安装
-- 管理多个项目的启动状态、停止状态与历史记录
-- 实时日志输出，支持错误筛选与关键字搜索
-- 自动识别本地 URL（如 `localhost:5173`）并可点击打开
-- 删除项目前会先确认；若项目运行中会先停止再删除
-- 退出应用时会先停止所有已启动项目再安全退出
-- 统一的应用内中文弹窗（提示 / 确认），支持 `ESC` 取消、`Enter` 确认、点击遮罩关闭
+## 前置条件（Windows）
 
-## 桌面行为设置
+1. Go 1.22+
+2. Node.js 20+ / pnpm
+3. WebView2
+4. （可选）Wails CLI：`go install github.com/wailsapp/wails/v2/cmd/wails@latest`
 
-- `开机自启`：Windows 登录后自动启动应用
-- `关闭时最小化到托盘`：关闭按钮不退出应用，只隐藏到系统托盘
-- 托盘左键：显示主窗口
-- 托盘右键菜单：`显示主窗口` / `退出`
-- 原生标题栏使用应用主题深色（`#162033`）：仅 Windows 11（build 22000+）生效，旧系统自动降级为系统默认色
+当前 CI/沙箱环境可能未预装 Go；请在本机安装后执行下方命令。
 
-## 技术栈
-
-- `Tauri 2`
-- `React 19`
-- `Vite 7`
-- `Rust`
-- `TypeScript`
-- `Vitest`
-
-## 开发环境
-
-- `Node.js 20+`
-- `pnpm`
-- `Rust`（含 `cargo`）
-
-如果在 Windows 下执行 `pnpm tauri dev` 或 `pnpm tauri build` 时提示找不到 `cargo`，先将以下目录加入 `PATH`：
+## 构建
 
 ```powershell
-$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
-```
+cd refactor
+go mod tidy
+go test ./...
 
-## 快速开始
-
-```bash
+cd desktop/frontend
 pnpm install
-pnpm run dev
-```
-
-开发模式前端地址固定为：`http://127.0.0.1:4173`
-
-## 常用命令
-
-```bash
-pnpm install
-pnpm run dev
-pnpm run dev:web
-pnpm run test
-pnpm run build:web
 pnpm run build
-pnpm run clean
-pnpm run package:win:nosign
+cd ../..
+
+# 安装 Wails CLI 与 NSIS 后，构建 Windows 安装程序（默认模式）
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+# 安装 NSIS 后重开终端，确保 makensis 在 PATH 中
+.\scripts\build.ps1
 ```
 
-- `pnpm run dev`：启动 Tauri 开发模式
-- `pnpm run dev:web`：仅启动前端开发服务（Vite）
-- `pnpm run test`：运行前端测试（Vitest）
-- `pnpm run build:web`：构建前端资源
-- `pnpm run build`：执行 Tauri 构建
-- `pnpm run clean`：清理构建产物与打包目录
-- `pnpm run package:win:nosign`：生成 Windows NSIS 包并整理到 `release-packages/`
+### Windows 安装程序（默认）
 
-## 配置文件
-
-### `dev-config.json`（推荐）
-
-```json
-{
-  "name": "my-project",
-  "command": "pnpm run dev",
-  "cwd": "E:/workspace/my-project",
-  "port": 5173,
-  "env": {
-    "NODE_ENV": "development"
-  }
-}
-```
-
-字段说明：
-
-- `command`：启动命令（必填）
-- `cwd`：工作目录（必填）
-- `name`：项目显示名（可选）
-- `port`：端口（可选）
-- `env`：环境变量（可选）
-
-### 自动配置规则（无 `dev-config.json` 时）
-
-- 检测 `package.json` 的脚本优先级：`dev` > `start` > `serve` > `start`（兜底）
-- 根据锁文件识别包管理器：`pnpm-lock.yaml` > `yarn.lock` > `npm`
-- 生成命令形如：`pnpm run dev`
-
-## 打包输出
-
-默认 Tauri bundle 输出目录：
-
-```text
-src-tauri/target/release/bundle/
-```
-
-打包后脚本会自动整理产物到：
-
-```text
-release-packages/
-```
-
-例如：
-
-```text
-Auto Dev Launcher_2.0.0_x64-setup.exe
-```
-
-只验证 Rust 侧编译（不产出安装包）：
+`build.ps1` 默认生成 NSIS 安装程序，带应用图标、安装、开始菜单和卸载能力。安装 Wails CLI 与 NSIS 后，执行：
 
 ```powershell
-$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
-pnpm tauri build --debug --no-bundle
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+# 安装 NSIS 后重开终端，确保 makensis 在 PATH 中
+.\scripts\build.ps1 -Package Installer
 ```
 
-## 项目结构
+安装程序输出到 `desktop/build/bin/`。Wails 会使用 NSIS 创建带安装、开始菜单和卸载能力的 Windows 安装包。
 
-```text
-src/
-  renderer/
-    components/            React 组件（项目列表、日志面板、弹窗等）
-    contexts/              应用状态管理与弹窗上下文（AppContext / DialogContext）
-    lib/desktop.ts         桌面能力调用封装（Tauri API）
-    App.tsx                主界面与交互逻辑
-    main.tsx               前端入口
-  shared/types.ts          前后端共享类型
+### 绿色版（可选）
 
-src-tauri/
-  src/config.rs            项目配置解析与校验
-  src/process_manager.rs   进程启动/停止、日志采集、URL 检测
-  src/storage.rs           历史与设置持久化
-  src/lib.rs               Tauri 命令注册、托盘、窗口行为与标题栏主题色
-  src/main.rs              桌面应用入口
-  tauri.conf.json          Tauri 构建与窗口配置
-
-scripts/
-  clean.js                     清理构建与打包目录
-  verify-icon.js               校验图标配置
-  collect-release-packages.js  整理打包产物
+```powershell
+.\scripts\build.ps1 -Package Portable
 ```
 
-## 故障排查
+绿色版输出：`bin/auto-dev-launcher.exe`。它可直接运行，但不会创建开始菜单或卸载项；该版本使用 `windowsgui` 子系统，不会显示 CMD 窗口。
 
-### 1. 找不到 `cargo`
+使用 Wails 开发热重载：
 
-确认已安装 Rust，并将 `%USERPROFILE%\.cargo\bin` 加入系统环境变量或当前终端 `PATH`。
+```powershell
+cd refactor/desktop
+wails dev
+```
 
-### 2. 端口 4173 被占用
+## 兼容性
 
-`dev:web` 固定使用 `127.0.0.1:4173` 且 `strictPort=true`。请先释放端口后再执行 `pnpm run dev`。
+- 用户数据：`%APPDATA%/auto-dev-launcher-gui/`
+- 文件：`project-history.json`、`app-settings.json`（含 `.bak`）
+- 根目录 Tauri 工程未改默认入口脚本
 
-### 3. 删除项目后未立即生效
+## 说明
 
-应用会先尝试停止项目进程，再执行删除；如果停止失败，会保留记录并提示错误。
-
-## 相关文档
-
-- `docs/CHANGELOG.md`：版本更新记录
-- `docs/DESIGN_NOTES.md`：界面设计说明
-- `docs/TAURI_MIGRATION.md`：迁移记录
-- `scripts/README.md`：脚本说明
+- 新 Go 代码含中文注释（UTF-8）
+- 构建完成后不会自动启动应用
+- v1 仅 Windows

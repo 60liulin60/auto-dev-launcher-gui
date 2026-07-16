@@ -1,0 +1,45 @@
+{
+  "name": "auto-dev-launcher-gui",
+  "version": "2.0.0",
+  "description": "Auto Dev Launcher GUI - Go / Wails Desktop",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/60liulin60/auto-dev-launcher-gui.git"
+  },
+  "bugs": {
+    "url": "https://github.com/60liulin60/auto-dev-launcher-gui/issues"
+  },
+  "homepage": "https://github.com/60liulin60/auto-dev-launcher-gui#readme",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "wails",
+    "dev-server",
+    "launcher",
+    "gui"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-window": "^2.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.10",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "fast-check": "^4.9.0",
+    "happy-dom": "^20.10.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "^4.1.10"
+  }
+}

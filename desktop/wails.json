@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "auto-dev-launcher",
+  "outputfilename": "auto-dev-launcher",
+  "frontend:dir": "frontend",
+  "frontend:install": "pnpm install",
+  "frontend:build": "pnpm run build",
+  "frontend:dev:watcher": "pnpm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "auto-dev-launcher",
+    "email": ""
+  },
+  "info": {
+    "companyName": "auto-dev-launcher",
+    "productName": "auto-dev-launcher",
+    "productVersion": "2.0.0",
+    "copyright": "MIT",
+    "comments": "Go/Wails refactor"
+  }
+}

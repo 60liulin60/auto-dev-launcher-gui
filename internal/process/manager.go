@@ -1,13 +1,16 @@
 package process
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -63,6 +66,8 @@ type managedProcess struct {
 	urlDetected    atomic.Bool
 	// killOnce 保证只杀一次
 	killOnce sync.Once
+	// stopping 标记进程正在被主动停止；置位后读管道报错视为正常终止，不上报
+	stopping atomic.Bool
 }
 
 // Manager 多项目进程管理器
@@ -224,6 +229,8 @@ func (m *Manager) StopAllServers() error {
 func (m *Manager) killManaged(mp *managedProcess) error {
 	var killErr error
 	mp.killOnce.Do(func() {
+		// 先置位停止标志，使随后关闭管道触发的读错误被识别为正常终止。
+		mp.stopping.Store(true)
 		if runtime.GOOS == "windows" {
 			cmd := exec.Command("taskkill", "/pid", fmt.Sprintf("%d", mp.pid), "/T", "/F")
 			hideWindow(cmd)
@@ -365,7 +372,8 @@ func (m *Manager) spawnOutputReader(projectID string, r io.Reader, mp *managedPr
 			m.queueOutput(projectID, mp, clean)
 		}
 		if err != nil {
-			if err != io.EOF {
+			// EOF 是正常结束；进程被停止后管道关闭引发的读错误也属正常，不上报。
+			if err != io.EOF && !mp.stopping.Load() && !isClosedPipeError(err) {
 				m.queueOutput(projectID, mp, fmt.Sprintf("\noutput read error: %v\n", err))
 			}
 			return
@@ -559,7 +567,6 @@ func createShellCommand(raw string) *exec.Cmd {
 	return cmd
 }
 
-
 func currentTimestampMS() uint64 {
 	return uint64(time.Now().UnixMilli())
 }
@@ -567,4 +574,20 @@ func currentTimestampMS() uint64 {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// isClosedPipeError 判断读错误是否源于管道/文件已关闭。
+// 进程被停止或自行退出时，stdout/stderr 管道会被关闭，
+// 正在阻塞的 Read 会返回 "file already closed" 一类错误——
+// 这属于正常终止的副产品，不应作为错误输出上报给用户。
+func isClosedPipeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrClosed) || errors.Is(err, fs.ErrClosed) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "file already closed") ||
+		strings.Contains(msg, "closed pipe")
 }

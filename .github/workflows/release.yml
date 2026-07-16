@@ -1,0 +1,138 @@
+name: Release Desktop
+
+# 打包桌面应用（Go/Wails）。推送 v* 标签时出正式包，也可手动触发做验证构建。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      upload_artifacts:
+        description: "上传构建产物（手动触发时默认开启）"
+        type: boolean
+        default: true
+
+# 只读仓库内容；创建 Release 需要写 contents。
+permissions:
+  contents: write
+
+# 同一分支/标签的重复运行只保留最新一次。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.22"
+  NODE_VERSION: "20"
+  PNPM_VERSION: "9"
+  WAILS_VERSION: "v2.9.2"
+  # SumDB 在部分环境不可达，与本地 build.ps1 保持一致。
+  GONOSUMDB: "*"
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 一个平台失败不影响另一个平台继续出包。
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (universal)
+            os: macos-latest
+            platform: darwin/universal
+            # macOS 产出 .app，打包成 zip 便于分发。
+            artifact_glob: desktop/build/bin/*.app
+            artifact_name: auto-dev-launcher-macos
+          - name: Windows (NSIS)
+            os: windows-latest
+            platform: windows/amd64
+            wails_flags: -nsis
+            artifact_glob: desktop/build/bin/*installer*.exe
+            artifact_name: auto-dev-launcher-windows-installer
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # 缓存 go.sum 对应的模块下载。
+          cache-dependency-path: go.sum
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      # Linux/macOS runner 上 GOBIN 默认不在 PATH，手动补上。
+      - name: Add Go bin to PATH (Unix)
+        if: runner.os != 'Windows'
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Build frontend bundle
+        working-directory: desktop/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Run Go tests
+        run: go test ./...
+
+      # 桌面是主 package 而非独立模块，Wails 在 desktop 目录下构建。
+      # -s 跳过前端依赖安装（上面已 build），-m 跳过 go mod tidy，
+      # -nosyncgomod 阻止 Wails 改写 go.mod，与本地 build.ps1 保持一致。
+      - name: Wails build
+        working-directory: desktop
+        # macOS 的 WebKit/systray 绑定依赖 CGO；runner 自带 Xcode clang。
+        env:
+          CGO_ENABLED: ${{ runner.os == 'macOS' && '1' || '' }}
+        run: wails build -platform ${{ matrix.platform }} ${{ matrix.wails_flags }} -s -m -nosyncgomod
+
+      # macOS 的 .app 是目录，压成 zip 才能作为单文件产物上传。
+      - name: Zip macOS app
+        if: runner.os == 'macOS'
+        working-directory: desktop/build/bin
+        run: |
+          APP="$(ls -d *.app | head -n1)"
+          ditto -c -k --keepParent "$APP" "auto-dev-launcher-macos.zip"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            desktop/build/bin/*installer*.exe
+            desktop/build/bin/*.zip
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 仅在推送 tag 时创建 GitHub Release 并附带两平台产物。
+  release:
+    name: Publish Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          generate_release_notes: true

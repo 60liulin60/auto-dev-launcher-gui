@@ -2,6 +2,8 @@ import type {
   AppSettings,
   DevConfig,
   ProjectHistoryEntry,
+  RuntimeOption,
+  RuntimePreview,
   ServerProcess,
   ServerStatus,
   ValidationResult,
@@ -17,6 +19,14 @@ export interface HistoryEntryPayload
 }
 
 /**
+ * Wails 后端进程快照载荷：startTime 以毫秒时间戳（number）在 IPC 上传输，
+ * 前端再规范化为 Date。
+ */
+export interface ServerProcessPayload extends Omit<ServerProcess, 'startTime'> {
+  startTime: number
+}
+
+/**
  * Go App 结构体导出的方法（由 Wails 绑定到 window.go.main.App）。
  * 参数为位置参数，与 desktop/app.go 保持一致。
  */
@@ -26,10 +36,20 @@ export interface GoApp {
   StartServer(
     projectId: string,
     projectPath: string,
-    config: DevConfig
-  ): Promise<ServerProcess>
+    config: DevConfig,
+    runtimeOverride: string
+  ): Promise<ServerProcessPayload>
   StopServer(projectId: string): Promise<void>
   GetServerStatus(projectId: string): Promise<ServerStatus>
+  GetServerProcess(projectId: string): Promise<ServerProcessPayload>
+  ListRuntimes(): Promise<RuntimeOption[]>
+  PreviewRuntime(
+    projectPath: string,
+    runtimeOverride: string
+  ): Promise<RuntimePreview>
+  InstallRuntime(version: string): Promise<void>
+  SelectScriptFile(): Promise<string>
+  LoadScriptConfig(scriptPath: string): Promise<DevConfig>
   LoadHistory(): Promise<HistoryEntryPayload[]>
   AddToHistory(entry: HistoryEntryPayload): Promise<void>
   RemoveFromHistory(projectId: string): Promise<void>

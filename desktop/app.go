@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync/atomic"
 
 	"github.com/60liulin60/auto-dev-launcher-gui/refactor/internal/config"
 	"github.com/60liulin60/auto-dev-launcher-gui/refactor/internal/platform"
 	"github.com/60liulin60/auto-dev-launcher-gui/refactor/internal/process"
+	noderuntime "github.com/60liulin60/auto-dev-launcher-gui/refactor/internal/runtime"
 	"github.com/60liulin60/auto-dev-launcher-gui/refactor/internal/storage"
 	"github.com/60liulin60/auto-dev-launcher-gui/refactor/internal/types"
 
@@ -55,6 +59,7 @@ func NewApp() (*App, error) {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.process.SetEmitter(&runtimeEmitter{ctx: ctx})
+	a.refreshRuntimes()
 
 	// 与现网一致：启动时把设置里的自启开关应用到系统，
 	// 并将真实注册表状态回写（忽略非 Windows 或失败情况）。
@@ -151,9 +156,132 @@ func (a *App) ValidateConfig(cfg types.DevConfig) types.ValidationResult {
 	return config.ValidateDevConfig(cfg)
 }
 
-// StartServer 启动项目开发服务器（必要时先装依赖）。
-func (a *App) StartServer(projectID, projectPath string, cfg types.DevConfig) (types.ServerProcess, error) {
-	return a.process.StartServer(projectID, projectPath, cfg)
+// StartServer 启动项目（必要时先装依赖），runtimeOverride 为本机历史里保存的版本覆盖值。
+func (a *App) StartServer(projectID, projectPath string, cfg types.DevConfig, runtimeOverride string) (types.ServerProcess, error) {
+	return a.process.StartServer(process.StartOptions{
+		ProjectID:       projectID,
+		ProjectPath:     projectPath,
+		Config:          cfg,
+		RuntimeOverride: runtimeOverride,
+	})
+}
+
+// GetServerProcess 查询项目进程详情（退出码、耗时、运行时）。
+func (a *App) GetServerProcess(projectID string) types.ServerProcess {
+	return a.process.GetServerProcess(projectID)
+}
+
+// refreshRuntimes 重新探测本机 nvm-windows 安装的 Node 版本。
+func (a *App) refreshRuntimes() {
+	available, err := noderuntime.Discover(os.Getenv("NVM_HOME"))
+	if err != nil {
+		// 探测失败不阻塞启动：退化为只提供系统默认运行时
+		available = nil
+	}
+	a.process.SetRuntimes(available, noderuntime.System())
+}
+
+// ListRuntimes 返回本机可选的 Node 运行时（含"系统默认"），供界面下拉选择。
+func (a *App) ListRuntimes() []types.RuntimeOption {
+	a.refreshRuntimes()
+	available, system := a.process.Runtimes()
+
+	options := make([]types.RuntimeOption, 0, len(available)+1)
+	for _, item := range available {
+		options = append(options, types.RuntimeOption{
+			Version: item.Version,
+			Dir:     item.Dir,
+			Source:  string(item.Source),
+			Label:   item.Version,
+		})
+	}
+	options = append(options, types.RuntimeOption{
+		Version: "",
+		Dir:     system.Dir,
+		Source:  string(noderuntime.SourceSystem),
+		Label:   "系统默认",
+	})
+	return options
+}
+
+// PreviewRuntime 解析某项目将使用的运行时，供启动前显示。
+// 版本未安装时不报错，而是返回 Missing=true 让界面提供"安装"入口。
+func (a *App) PreviewRuntime(projectPath, runtimeOverride string) types.RuntimePreview {
+	path := strings.TrimSpace(projectPath)
+	if path == "" {
+		return types.RuntimePreview{Source: "系统默认", Label: "系统默认"}
+	}
+
+	// dev-config.json 里的 runtime 优先级最高，先从配置里取出来
+	configVersion := ""
+	if !config.IsScriptPath(path) {
+		if cfg, err := config.LoadProjectConfig(path); err == nil {
+			configVersion = cfg.Runtime
+		}
+	}
+
+	resolution, _, err := a.process.ResolveRuntime(path, configVersion, runtimeOverride)
+	if err != nil {
+		preview := types.RuntimePreview{Source: "未解析", Label: "未安装", Missing: true, Requested: configVersion}
+		if override := strings.TrimSpace(runtimeOverride); override != "" {
+			preview.Requested = override
+		}
+		var notFound *noderuntime.ErrRuntimeNotFound
+		if errors.As(err, &notFound) {
+			preview.Requested = notFound.Requested
+			preview.Available = notFound.Available
+			preview.Note = notFound.Error()
+		} else {
+			preview.Note = err.Error()
+		}
+		return preview
+	}
+
+	preview := types.RuntimePreview{
+		Version: resolution.Runtime.Version,
+		Label:   resolution.Runtime.Display(),
+		Source:  describeRuntimeSource(resolution.Origin),
+		Note:    resolution.Note,
+	}
+	return preview
+}
+
+// describeRuntimeSource 把运行时来源转成界面文案
+func describeRuntimeSource(origin noderuntime.Origin) string {
+	switch origin {
+	case noderuntime.OriginConfig:
+		return "dev-config.json"
+	case noderuntime.OriginHistory:
+		return "本机记录"
+	case noderuntime.OriginSpec:
+		return "项目版本声明"
+	default:
+		return "系统默认"
+	}
+}
+
+// InstallRuntime 通过 nvm-windows 安装指定 Node 版本，成功后重新探测。
+func (a *App) InstallRuntime(version string) error {
+	if err := noderuntime.Install(os.Getenv("NVM_HOME"), version); err != nil {
+		return err
+	}
+	a.refreshRuntimes()
+	return nil
+}
+
+// SelectScriptFile 打开选择脚本文件对话框，取消返回空字符串。
+func (a *App) SelectScriptFile() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择批处理脚本",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "批处理脚本 (*.bat;*.cmd)", Pattern: "*.bat;*.cmd"},
+		},
+	})
+}
+
+// LoadScriptConfig 根据 .bat/.cmd 文件生成脚本项目配置。
+func (a *App) LoadScriptConfig(scriptPath string) (types.DevConfig, error) {
+	return config.BuildScriptConfig(scriptPath)
 }
 
 // StopServer 停止指定项目进程。

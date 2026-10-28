@@ -66,7 +66,7 @@ type OutputRowProps = {
   lines: OutputLineModel[]
 }
 
-const OutputRow = memo(({ ariaAttributes, index, style, lines }: RowComponentProps<OutputRowProps>) => {
+const OutputRow = ({ ariaAttributes, index, style, lines }: RowComponentProps<OutputRowProps>) => {
   const line = lines[index]
   const parts = line.text.split(URL_REGEX)
 
@@ -106,9 +106,7 @@ const OutputRow = memo(({ ariaAttributes, index, style, lines }: RowComponentPro
       })}
     </div>
   )
-})
-
-OutputRow.displayName = 'OutputRow'
+}
 
 const OutputConsole: React.FC<OutputConsoleProps> = memo(({ projectId, serverState }) => {
   const listRef = useRef<ListImperativeAPI | null>(null)

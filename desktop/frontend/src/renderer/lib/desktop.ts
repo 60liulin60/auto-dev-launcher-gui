@@ -2,11 +2,19 @@ import type {
   AppSettings,
   DevConfig,
   ProjectHistoryEntry,
+  RuntimeOption,
+  RuntimePreview,
   ServerProcess,
   ServerStatus,
+  ServerStatusChangePayload,
   ValidationResult,
 } from '../../shared/types'
-import type { GoApp, HistoryEntryPayload, WailsRuntime } from '../../wails-runtime'
+import type {
+  GoApp,
+  HistoryEntryPayload,
+  ServerProcessPayload,
+  WailsRuntime,
+} from '../../wails-runtime'
 
 const DESKTOP_EVENTS = {
   serverOutput: 'server-output',
@@ -19,11 +27,6 @@ type RemoveListener = () => void
 type ServerOutputPayload = {
   projectId: string
   output: string
-}
-
-type ServerStatusPayload = {
-  projectId: string
-  status: ServerStatus
 }
 
 type ServerUrlPayload = {
@@ -69,6 +72,13 @@ function serializeHistoryEntry(entry: ProjectHistoryEntry): HistoryEntryPayload 
       entry.lastLaunched instanceof Date
         ? entry.lastLaunched.getTime()
         : new Date(entry.lastLaunched).getTime(),
+  }
+}
+
+function normalizeServerProcess(process: ServerProcessPayload): ServerProcess {
+  return {
+    ...process,
+    startTime: new Date(process.startTime),
   }
 }
 
@@ -159,17 +169,19 @@ export const desktop = {
     return app.ValidateConfig(config)
   },
 
-  startServer(
+  async startServer(
     projectId: string,
     projectPath: string,
-    config: DevConfig
+    config: DevConfig,
+    runtimeOverride = ''
   ): Promise<ServerProcess> {
     const app = getApp()
     if (!app) {
-      return Promise.reject(createDesktopOnlyError('启动服务'))
+      throw createDesktopOnlyError('启动服务')
     }
 
-    return app.StartServer(projectId, projectPath, config)
+    const process = await app.StartServer(projectId, projectPath, config, runtimeOverride)
+    return normalizeServerProcess(process)
   },
 
   stopServer(projectId: string): Promise<void> {
@@ -188,6 +200,67 @@ export const desktop = {
     }
 
     return app.GetServerStatus(projectId)
+  },
+
+  async getServerProcess(projectId: string): Promise<ServerProcess> {
+    const app = getApp()
+    if (!app) {
+      throw createDesktopOnlyError('查询服务进程')
+    }
+
+    const process = await app.GetServerProcess(projectId)
+    return normalizeServerProcess(process)
+  },
+
+  listRuntimes(): Promise<RuntimeOption[]> {
+    const app = getApp()
+    if (!app) {
+      return Promise.resolve([])
+    }
+
+    return app.ListRuntimes()
+  },
+
+  previewRuntime(projectPath: string, runtimeOverride = ''): Promise<RuntimePreview> {
+    const app = getApp()
+    if (!app) {
+      return Promise.resolve({
+        version: '',
+        label: '系统默认',
+        source: '系统默认',
+        missing: false,
+      })
+    }
+
+    return app.PreviewRuntime(projectPath, runtimeOverride)
+  },
+
+  installRuntime(version: string): Promise<void> {
+    const app = getApp()
+    if (!app) {
+      return Promise.reject(createDesktopOnlyError('安装 Node 运行时'))
+    }
+
+    return app.InstallRuntime(version)
+  },
+
+  async selectScriptFile(): Promise<string | null> {
+    const app = getApp()
+    if (!app) {
+      return null
+    }
+
+    const selected = await app.SelectScriptFile()
+    return selected === '' ? null : selected
+  },
+
+  loadScriptConfig(scriptPath: string): Promise<DevConfig> {
+    const app = getApp()
+    if (!app) {
+      return Promise.reject(createDesktopOnlyError('读取脚本配置'))
+    }
+
+    return app.LoadScriptConfig(scriptPath)
   },
 
   async loadHistory(): Promise<ProjectHistoryEntry[]> {
@@ -283,11 +356,14 @@ export const desktop = {
   },
 
   onServerStatusChange(
-    callback: (projectId: string, status: ServerStatus) => void
+    callback: (projectId: string, payload: ServerStatusChangePayload) => void
   ): Promise<RemoveListener> {
-    return listenServerEvent<ServerStatusPayload>(DESKTOP_EVENTS.serverStatusChange, (payload) => {
-      callback(payload.projectId, payload.status)
-    })
+    return listenServerEvent<ServerStatusChangePayload>(
+      DESKTOP_EVENTS.serverStatusChange,
+      (payload) => {
+        callback(payload.projectId, payload)
+      }
+    )
   },
 
   onServerUrlDetected(callback: (projectId: string, url: string) => void): Promise<RemoveListener> {

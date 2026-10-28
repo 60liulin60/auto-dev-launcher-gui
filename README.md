@@ -11,13 +11,21 @@
 | Phase 2 Wails 绑定 + bridge | 完成 | `desktop/main.go`、`desktop/app.go`（14 个 IPC 方法 + 事件桥接）、`frontend/.../desktop.ts` 已切 Wails runtime |
 | Phase 3 托盘/自启 | 完成 | 开机自启（注册表）+ systray 托盘（显示主窗口/退出菜单）+ close-to-tray（`OnBeforeClose` 隐藏窗口）；图标嵌入 `build/icon.ico` |
 | Phase 4 打包回归 | 完成 | `go build ./...` / `go test ./...` / `go vet` 全绿，前端 vitest 5/5 通过，`wails build` 端到端产出可执行 EXE（11MB）+ NSIS 安装包（`auto-dev-launcher-amd64-installer.exe`，6.5MB）均已实测生成 |
+| Phase 5 多版本 Node + 批处理脚本 | 完成 | 每个子进程单独注入 PATH（不执行 `nvm use`），可同时跑不同 Node 版本的项目；新增 `kind: script` 支持 `.bat`/`.cmd`；新增 `completed` 状态与退出码/耗时展示。详见 `GLOSSARY.md`、`docs/adr/0001-per-process-path-injection.md`、`docs/IPC_CONTRACT.md` |
+
+## 多版本 Node 与脚本项目
+
+- **运行时选择**：`dev-config.json` 的 `runtime` → 本机记录的 `runtimeOverride` → 项目版本声明（`.nvmrc` → `.node-version` → `package.json` 的 `engines.node`）→ 系统默认；每种来源都取"匹配前缀的最高已装版本"。
+- **不污染全局**：程序从不执行 `nvm use`，只在启动子进程时把目标版本目录前置到该进程的 `PATH`，因此多个项目可以并行跑在各自的 Node 版本上（`docs/adr/0001-per-process-path-injection.md`）。
+- **版本缺失**：声明了本机没装的版本会直接报错并给出安装入口，不会静默回退到系统 Node。
+- **脚本项目**：新增项目时可选 `.bat` / `.cmd`，支持启动参数与自定义工作目录（默认脚本所在目录），不注入 Node 运行时。
 
 ## 结构
 
 ```
 refactor/
   go.mod
-  internal/{types,config,storage,process,platform}
+  internal/{types,config,storage,process,platform,runtime}
   desktop/                 # package main + Wails 绑定
   desktop/frontend/        # React（bridge 已切 Wails）
   docs/IPC_CONTRACT.md

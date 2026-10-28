@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/60liulin60/auto-dev-launcher-gui/refactor/internal/runtime"
 	"github.com/60liulin60/auto-dev-launcher-gui/refactor/internal/types"
 )
 
@@ -50,6 +51,8 @@ func LoadProjectConfig(projectPath string) (types.DevConfig, error) {
 		if err := json.Unmarshal(content, &config); err != nil {
 			return types.DevConfig{}, fmt.Errorf("dev-config.json 不是有效的 JSON: %w", err)
 		}
+		// 旧配置没有 kind 字段，按 node 项目处理
+		config.Kind = config.Kind.Normalize()
 		if err := ValidateDevConfigOrError(config); err != nil {
 			return types.DevConfig{}, err
 		}
@@ -106,6 +109,62 @@ func ValidateProjectDirectory(path string) error {
 	return fmt.Errorf("目录中未找到 dev-config.json 或 package.json 文件")
 }
 
+// IsScriptPath 判断路径是否为受支持的脚本文件（.bat/.cmd）
+func IsScriptPath(path string) bool {
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(path))) {
+	case ".bat", ".cmd":
+		return true
+	}
+	return false
+}
+
+// ValidateScriptTarget 校验脚本项目路径：必须是存在的 .bat/.cmd 文件
+func ValidateScriptTarget(path string) error {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return fmt.Errorf("脚本路径不能为空")
+	}
+	if !IsScriptPath(trimmed) {
+		return fmt.Errorf("只支持 .bat 或 .cmd 脚本")
+	}
+	info, err := os.Stat(trimmed)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("脚本文件不存在")
+		}
+		return fmt.Errorf("无法访问脚本文件: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("脚本路径指向的是目录")
+	}
+	return nil
+}
+
+// BuildScriptConfig 依据 .bat/.cmd 文件生成脚本项目配置：
+// 命令就是脚本本身，工作目录默认为脚本所在目录。
+func BuildScriptConfig(scriptPath string) (types.DevConfig, error) {
+	path, err := SanitizePath(scriptPath)
+	if err != nil {
+		return types.DevConfig{}, err
+	}
+	if err := ValidateScriptTarget(path); err != nil {
+		return types.DevConfig{}, err
+	}
+
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	return types.DevConfig{
+		Kind:    types.KindScript,
+		Name:    &name,
+		Command: path,
+		Cwd:     filepath.Dir(path),
+	}, nil
+}
+
+// ValidateDirectory 校验路径存在且是目录（脚本项目的工作目录不受 package.json 限制）
+func ValidateDirectory(path string) error {
+	return validateExistingDirectory(path)
+}
+
 // DetectPackageManager 根据锁文件探测包管理器
 func DetectPackageManager(projectPath string) string {
 	if fileExists(filepath.Join(projectPath, "pnpm-lock.yaml")) {
@@ -120,6 +179,11 @@ func DetectPackageManager(projectPath string) string {
 // ValidateDevConfig 校验 DevConfig 字段合法性
 func ValidateDevConfig(config types.DevConfig) types.ValidationResult {
 	var errors []types.ValidationError
+
+	kind := config.Kind.Normalize()
+	if kind != types.KindNode && kind != types.KindScript {
+		errors = append(errors, types.ValidationError{Field: "kind", Message: fmt.Sprintf("未知的项目类型: %s", config.Kind)})
+	}
 
 	if strings.TrimSpace(config.Command) == "" {
 		errors = append(errors, types.ValidationError{Field: "command", Message: "命令不能为空"})
@@ -137,8 +201,22 @@ func ValidateDevConfig(config types.DevConfig) types.ValidationResult {
 		}
 	}
 
-	if strings.TrimSpace(config.Cwd) == "" {
+	if kind == types.KindScript {
+		// 脚本项目：命令必须是受支持的脚本文件，工作目录缺省为脚本所在目录
+		if strings.TrimSpace(config.Command) != "" && !IsScriptPath(config.Command) {
+			errors = append(errors, types.ValidationError{Field: "command", Message: "脚本项目只支持 .bat 或 .cmd 文件"})
+		}
+	} else if strings.TrimSpace(config.Cwd) == "" {
 		errors = append(errors, types.ValidationError{Field: "cwd", Message: "工作目录不能为空"})
+	}
+
+	if runtimeVersion := strings.TrimSpace(config.Runtime); runtimeVersion != "" {
+		if _, err := runtime.NormalizeSpec(runtimeVersion); err != nil {
+			errors = append(errors, types.ValidationError{
+				Field:   "runtime",
+				Message: fmt.Sprintf("运行时版本写法无法解析: %s（可写 18 / 18.20.4）", runtimeVersion),
+			})
+		}
 	}
 
 	if config.Port != nil && *config.Port == 0 {
@@ -231,6 +309,7 @@ func buildAutoConfig(projectPath string) (types.DevConfig, error) {
 
 	pm := DetectPackageManager(projectPath)
 	return types.DevConfig{
+		Kind:    types.KindNode,
 		Name:    projectName,
 		Command: fmt.Sprintf("%s run %s", pm, startScript),
 		Cwd:     projectPath,

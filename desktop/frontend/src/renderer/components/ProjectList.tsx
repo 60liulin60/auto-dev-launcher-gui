@@ -9,6 +9,7 @@ const ProjectList: React.FC<ProjectListProps> = memo(({
   onProjectSelect,
   onProjectLaunch,
   onProjectStop,
+  onProjectEdit,
   onProjectOpen,
   onProjectRemove
 }) => {
@@ -20,7 +21,7 @@ const ProjectList: React.FC<ProjectListProps> = memo(({
     return (
       <div className="projects-section">
         <h2>项目</h2>
-        <p className="empty-message">暂无项目，请先选择目录。</p>
+        <p className="empty-message">暂无项目，请先选择目录或脚本。</p>
       </div>
     )
   }
@@ -42,6 +43,7 @@ const ProjectList: React.FC<ProjectListProps> = memo(({
               onSelect={onProjectSelect}
               onLaunch={onProjectLaunch}
               onStop={onProjectStop}
+              onEdit={onProjectEdit}
               onOpenInExplorer={onProjectOpen}
               onRemove={onProjectRemove}
             />

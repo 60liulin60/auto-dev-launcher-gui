@@ -1,15 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { ServerState, ServerStatus } from './types'
+import {
+  ProjectSettingsUpdate,
+  ScriptProjectDraft,
+  ServerState,
+  ServerStatus,
+} from './types'
 import { useApp } from './contexts/AppContext'
 import { useDialog } from './contexts/DialogContext'
-import { AppSettings, ProjectHistoryEntry } from '../shared/types'
-import TitleBar from './components/TitleBar'
+import {
+  AppSettings,
+  ProjectHistoryEntry,
+  ServerStatusChangePayload,
+} from '../shared/types'
 import TitleBar from './components/TitleBar'
 import Header from './components/Header'
 import ProjectList from './components/ProjectList'
 import OutputConsole from './components/OutputConsole'
+import AddProjectDialog from './components/AddProjectDialog'
+import ProjectSettingsDialog from './components/ProjectSettingsDialog'
 import { desktop } from './lib/desktop'
+import { getErrorMessage } from './lib/format'
 
 const MAX_OUTPUT_CHUNKS = 100
 const SERVER_STOP_POLL_INTERVAL_MS = 150
@@ -57,14 +68,6 @@ function getProjectName(projectPath: string, fallbackName?: string): string {
   return segments[segments.length - 1] || 'Unknown'
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
-}
-
 function isServerActive(status: ServerStatus): boolean {
   return status === 'running' || status === 'starting'
 }
@@ -79,6 +82,8 @@ function sleep(durationMs: number): Promise<void> {
 
 function App() {
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS)
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
 
   const {
     state,
@@ -137,6 +142,28 @@ function App() {
       ...currentState,
       status
     }))
+  }, [updateServerStateWith])
+
+  // 合并状态事件的退出码、耗时与运行时信息，进入 starting 时清空上一轮结果。
+  const applyServerStatusChange = useCallback((
+    projectId: string,
+    payload: ServerStatusChangePayload
+  ) => {
+    updateServerStateWith(projectId, (currentState) => {
+      const isStarting = payload.status === 'starting'
+      const nextState: ServerState = {
+        ...currentState,
+        status: payload.status,
+        exitCode: isStarting ? undefined : payload.exitCode,
+        durationMs: isStarting ? undefined : payload.durationMs,
+        runtime: payload.runtime ?? (isStarting ? undefined : currentState.runtime),
+        runtimeSource: payload.runtimeSource ?? (isStarting ? undefined : currentState.runtimeSource),
+        runtimeNote: payload.runtimeNote ?? (isStarting ? undefined : currentState.runtimeNote),
+        errorMessage: isStarting ? undefined : currentState.errorMessage,
+      }
+
+      return nextState
+    })
   }, [updateServerStateWith])
 
   const applyDetectedUrl = useCallback((projectId: string, detectedUrl: string) => {
@@ -298,8 +325,11 @@ function App() {
       }
     }
 
-    const handleServerStatusChange = (projectId: string, status: ServerStatus) => {
-      applyServerStatus(projectId, status)
+    const handleServerStatusChange = (
+      projectId: string,
+      payload: ServerStatusChangePayload
+    ) => {
+      applyServerStatusChange(projectId, payload)
     }
 
     const handleServerUrlDetected = (projectId: string, url: string) => {
@@ -330,7 +360,7 @@ function App() {
         cancelAnimationFrame(rafIdRef.current)
       }
     }
-  }, [applyDetectedUrl, applyServerStatus, loadHistory, loadSettings, flushOutputs])
+  }, [applyDetectedUrl, applyServerStatusChange, loadHistory, loadSettings, flushOutputs])
 
   const handleSelectFolder = useCallback(async () => {
     try {
@@ -347,7 +377,10 @@ function App() {
             name: getProjectName(folder, config.name),
             path: folder,
             lastLaunched: new Date(),
-            config,
+            config: {
+              ...config,
+              kind: config.kind ?? 'node',
+            },
           })
 
           await loadHistory()
@@ -364,6 +397,43 @@ function App() {
     }
   }, [loadHistory, setSelectedFolder, showAlert])
 
+  const handleAddScriptProject = useCallback(async (draft: ScriptProjectDraft) => {
+    setSelectedFolder(draft.config.cwd)
+
+    await desktop.addToHistory({
+      id: createProjectId(draft.path),
+      name: draft.name,
+      path: draft.path,
+      lastLaunched: new Date(),
+      config: draft.config,
+    })
+
+    await loadHistory()
+    setSelectedProject(createProjectId(draft.path))
+  }, [loadHistory, setSelectedFolder, setSelectedProject])
+
+  const handleProjectSettingsUpdate = useCallback(async (
+    projectId: string,
+    update: ProjectSettingsUpdate
+  ) => {
+    const project = stateRef.current.projects.find((item) => item.id === projectId)
+    if (!project) {
+      throw new Error('项目不存在，可能已被移除。')
+    }
+
+    const nextEntry: ProjectHistoryEntry = {
+      ...project,
+      config: update.config ?? project.config,
+      runtimeOverride:
+        update.runtimeOverride === undefined
+          ? project.runtimeOverride
+          : update.runtimeOverride,
+    }
+
+    await desktop.addToHistory(nextEntry)
+    await loadHistory()
+  }, [loadHistory])
+
   const handleLaunchProject = useCallback(async (project: ProjectHistoryEntry) => {
     stoppingProjectsRef.current.delete(project.id)
 
@@ -372,10 +442,48 @@ function App() {
     }
 
     isLaunchingRef.current = true
+    const isScriptProject = project.config.kind === 'script'
+    const runtimeOverride = project.runtimeOverride ?? ''
 
     try {
+      // 启动前确认运行时可用；声明缺失时不静默回退，直接给出安装入口。
+      if (!isScriptProject) {
+        try {
+          const preview = await desktop.previewRuntime(project.path, runtimeOverride)
+          if (preview.missing) {
+            const requested = preview.requested || preview.version
+            updateServerState(project.id, {
+              status: 'error',
+              output: [`Error: 需要 Node ${requested}，本机未安装`],
+              errorMessage: `需要 Node ${requested}，本机未安装`,
+              runtimeNote: preview.note,
+            })
+            setSelectedProject(project.id)
+            return
+          }
+        } catch (error) {
+          console.error('[App] Failed to preview runtime:', error)
+        }
+      }
+
       updateServerState(project.id, { status: 'starting', output: [] })
-      await desktop.startServer(project.id, project.path, project.config)
+      const process = await desktop.startServer(
+        project.id,
+        project.path,
+        project.config,
+        runtimeOverride
+      )
+
+      updateServerStateWith(project.id, (currentState) => ({
+        ...currentState,
+        status: process.status,
+        runtime: process.runtime ?? currentState.runtime,
+        runtimeSource: process.runtimeSource ?? currentState.runtimeSource,
+        runtimeNote: process.runtimeNote ?? currentState.runtimeNote,
+        exitCode: process.exitCode,
+        durationMs: process.durationMs,
+        errorMessage: undefined,
+      }))
       setSelectedProject(project.id)
     } catch (error) {
       const errorMessage = getErrorMessage(error)
@@ -385,12 +493,13 @@ function App() {
 
       updateServerState(project.id, {
         status: 'error',
-        output: ['Error: ' + errorMessage]
+        output: ['Error: ' + errorMessage],
+        errorMessage,
       })
     } finally {
       isLaunchingRef.current = false
     }
-  }, [setSelectedProject, updateServerState, showAlert])
+  }, [setSelectedProject, updateServerState, updateServerStateWith, showAlert])
 
   const handleStopProject = useCallback((projectId: string) => {
     void stopProjectAndWait(projectId, '正在停止服务...')
@@ -464,11 +573,27 @@ function App() {
     return getServerState(state.selectedProjectId)
   }, [getServerState, state.selectedProjectId, state.serverStates])
 
+  const editingProject = useMemo(() => {
+    if (!editingProjectId) {
+      return null
+    }
+
+    return state.projects.find((project) => project.id === editingProjectId) ?? null
+  }, [editingProjectId, state.projects])
+
+  const handleCloseAddDialog = useCallback(() => {
+    setIsAddDialogOpen(false)
+  }, [])
+
+  const handleCloseSettingsDialog = useCallback(() => {
+    setEditingProjectId(null)
+  }, [])
+
   return (
     <div className="app">
       <TitleBar />
       <Header
-        onSelectFolder={handleSelectFolder}
+        onSelectFolder={() => setIsAddDialogOpen(true)}
         launchOnStartup={appSettings.launchOnStartup}
         closeToTrayOnClose={appSettings.closeToTrayOnClose}
         onLaunchOnStartupChange={handleLaunchOnStartupChange}
@@ -490,6 +615,7 @@ function App() {
             onProjectSelect={setSelectedProject}
             onProjectLaunch={handleLaunchProject}
             onProjectStop={handleStopProject}
+            onProjectEdit={setEditingProjectId}
             onProjectOpen={handleOpenInExplorer}
             onProjectRemove={handleRemoveFromHistory}
           />
@@ -500,6 +626,22 @@ function App() {
           />
         </div>
       </main>
+
+      {isAddDialogOpen && (
+        <AddProjectDialog
+          onClose={handleCloseAddDialog}
+          onAddNodeProject={() => void handleSelectFolder()}
+          onAddScriptProject={handleAddScriptProject}
+        />
+      )}
+
+      {editingProject && (
+        <ProjectSettingsDialog
+          project={editingProject}
+          onClose={handleCloseSettingsDialog}
+          onSave={handleProjectSettingsUpdate}
+        />
+      )}
     </div>
   )
 }

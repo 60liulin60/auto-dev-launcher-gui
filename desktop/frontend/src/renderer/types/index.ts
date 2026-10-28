@@ -2,9 +2,14 @@
  * 渲染进程类型定义
  */
 
-import { ProjectHistoryEntry, ServerStatus } from '../../shared/types'
+import {
+  DevConfig,
+  ProjectHistoryEntry,
+  RuntimePreview,
+  ServerStatus,
+} from '../../shared/types'
 
-export type { ProjectHistoryEntry, ServerStatus }
+export type { DevConfig, ProjectHistoryEntry, RuntimePreview, ServerStatus }
 
 /**
  * 服务器状态信息
@@ -13,6 +18,18 @@ export interface ServerState {
   status: ServerStatus
   output: string[]
   detectedUrl?: string
+  /** 进程退出码（completed / error 时提供）。 */
+  exitCode?: number
+  /** 进程运行时长（毫秒）。 */
+  durationMs?: number
+  /** 实际使用的 Node 版本。 */
+  runtime?: string
+  /** 运行时来源。 */
+  runtimeSource?: string
+  /** 运行时解析提示。 */
+  runtimeNote?: string
+  /** 启动失败原因（startServer 拒绝时由后端 message 填充）。 */
+  errorMessage?: string
 }
 
 /**
@@ -55,6 +72,7 @@ export interface ProjectCardProps {
   onSelect: (projectId: string) => void
   onLaunch: (project: ProjectHistoryEntry) => void
   onStop: (projectId: string) => void
+  onEdit: (projectId: string) => void
   onOpenInExplorer: (path: string) => void
   onRemove: (projectId: string) => void
 }
@@ -69,8 +87,26 @@ export interface ProjectListProps {
   onProjectSelect: (projectId: string) => void
   onProjectLaunch: (project: ProjectHistoryEntry) => void
   onProjectStop: (projectId: string) => void
+  onProjectEdit: (projectId: string) => void
   onProjectOpen: (path: string) => void
   onProjectRemove: (projectId: string) => void
+}
+
+/**
+ * 项目设置保存内容
+ */
+export interface ProjectSettingsUpdate {
+  runtimeOverride?: string
+  config?: DevConfig
+}
+
+/**
+ * 新增脚本项目草稿
+ */
+export interface ScriptProjectDraft {
+  path: string
+  name: string
+  config: DevConfig
 }
 
 /**

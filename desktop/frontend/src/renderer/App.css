@@ -369,6 +369,66 @@ input {
   color: #9cbcfb;
 }
 
+.runtime-badge {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface-raised);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.project-exit-info,
+.project-runtime-note {
+  margin: 5px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.project-exit-info {
+  color: var(--accent-success);
+}
+
+.project-exit-info.error {
+  color: var(--accent-danger);
+}
+
+.project-runtime-note {
+  color: var(--text-muted);
+}
+
+.runtime-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 7px 0 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(227, 176, 95, 0.45);
+  border-radius: 10px;
+  background: var(--accent-warning-soft);
+}
+
+.runtime-warning-text {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--accent-warning);
+}
+
+.runtime-warning-button {
+  min-width: 74px;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+  border-radius: 8px;
+}
+
 .project-actions {
   display: flex;
   gap: 6px;
@@ -707,6 +767,118 @@ button:disabled {
 
 .modal-action {
   min-width: 76px;
+}
+
+.form-dialog {
+  width: min(100%, 560px);
+}
+
+.add-project-options {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 20px;
+}
+
+.add-project-option {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 68px;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.add-project-option strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.add-project-option:hover:not(:disabled) {
+  border-color: var(--accent-primary);
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+
+.form-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.form-input,
+.form-select {
+  min-height: 34px;
+  padding: 0 10px;
+  width: 100%;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.form-input[readonly] {
+  color: var(--text-muted);
+}
+
+.form-input:focus,
+.form-select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.form-static {
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.form-static.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.form-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.form-row button {
+  flex-shrink: 0;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+  border-radius: 10px;
+}
+
+.form-hint,
+.form-note {
+  margin: -6px 0 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.form-note {
+  color: var(--text-muted);
 }
 
 @keyframes modal-overlay-in {

@@ -75,6 +75,17 @@ input {
   letter-spacing: 0.02em;
 }
 
+.titlebar-version {
+  margin-left: 10px;
+  padding: 1px 7px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
 .titlebar-controls {
   display: flex;
   align-items: stretch;

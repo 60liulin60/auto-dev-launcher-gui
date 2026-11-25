@@ -304,6 +304,15 @@ export const desktop = {
     return app.ClearHistory()
   },
 
+  getAppVersion(): Promise<string> {
+    const app = getApp()
+    if (!app) {
+      return Promise.resolve('2.0.2')
+    }
+
+    return app.GetAppVersion()
+  },
+
   loadSettings(): Promise<AppSettings> {
     const app = getApp()
     if (!app) {

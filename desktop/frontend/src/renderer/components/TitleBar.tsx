@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from 'react'
+import React, { memo, useCallback, useEffect, useState } from 'react'
 import { desktop } from '../lib/desktop'
 
 /**
@@ -23,10 +23,36 @@ const TitleBar: React.FC = memo(() => {
     void desktop.closeWindow()
   }, [])
 
+  const [version, setVersion] = useState('')
+
+  useEffect(() => {
+    let disposed = false
+
+    desktop
+      .getAppVersion()
+      .then((value) => {
+        if (!disposed) {
+          setVersion(value)
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('[titlebar] 读取版本失败:', error)
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [])
+
   return (
     <div className="titlebar">
       <div className="titlebar-drag" onDoubleClick={handleToggleMaximise}>
         <span className="titlebar-title">开发服务器启动工具</span>
+        {version ? (
+          <span className="titlebar-version" title="当前安装版本">
+            v{version}
+          </span>
+        ) : null}
       </div>
 
       <div className="titlebar-controls">

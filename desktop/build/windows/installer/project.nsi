@@ -108,6 +108,33 @@ FunctionEnd
 Section
     !insertmacro wails.setShellContext
 
+    ; Close the running old version before copying files to avoid a locked exe.
+    IfSilent closeRunningApp
+    MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "Setup will close the running Auto Dev Launcher before installing. Any running dev servers will also stop. Continue?" IDOK closeRunningApp
+    Abort
+    closeRunningApp:
+    ExecWait '"$SYSDIR\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /T /F' $0
+    Sleep 500
+
+    ; Wait until the existing EXE can be opened for writing (max ~10s).
+    StrCpy $1 0
+    IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" checkFileLock fileReady
+    checkFileLock:
+      ClearErrors
+      FileOpen $2 "$INSTDIR\${PRODUCT_EXECUTABLE}" a
+      IfErrors fileLocked
+      FileClose $2
+      Goto fileReady
+    fileLocked:
+      IntOp $1 $1 + 1
+      IntCmp $1 20 fileStillLocked
+      Sleep 500
+      Goto checkFileLock
+    fileStillLocked:
+      MessageBox MB_OK|MB_ICONSTOP "Auto Dev Launcher is still running or the installer cannot replace its EXE. Please exit it from the tray (or Task Manager), then run Setup again."
+      Abort
+    fileReady:
+
     !insertmacro wails.webview2runtime
 
     SetOutPath $INSTDIR

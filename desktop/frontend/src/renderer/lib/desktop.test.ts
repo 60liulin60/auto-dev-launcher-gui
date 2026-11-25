@@ -40,6 +40,16 @@ describe('desktop', () => {
     await expect(desktop.selectFolder()).resolves.toBeNull()
   })
 
+  it('returns the application version from the Go backend', async () => {
+    const getAppVersion = vi.fn().mockResolvedValueOnce('2.0.2')
+    installWailsRuntime({ GetAppVersion: getAppVersion })
+
+    const { desktop } = await import('./desktop')
+
+    await expect(desktop.getAppVersion()).resolves.toBe('2.0.2')
+    expect(getAppVersion).toHaveBeenCalledTimes(1)
+  })
+
   it('normalizes history timestamps returned by the Go backend', async () => {
     const loadHistory = vi.fn().mockResolvedValueOnce([
       {

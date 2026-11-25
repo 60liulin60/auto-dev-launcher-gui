@@ -43,6 +43,7 @@ export interface GoApp {
   GetServerStatus(projectId: string): Promise<ServerStatus>
   GetServerProcess(projectId: string): Promise<ServerProcessPayload>
   ListRuntimes(): Promise<RuntimeOption[]>
+  GetAppVersion(): Promise<string>
   PreviewRuntime(
     projectPath: string,
     runtimeOverride: string,

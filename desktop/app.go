@@ -59,6 +59,14 @@ func NewApp() (*App, error) {
 	}, nil
 }
 
+// appVersion 当前应用版本，与 desktop/wails.json 的 productVersion 保持一致。
+const appVersion = "2.0.2"
+
+// GetAppVersion 返回当前应用版本，供界面显示安装版本。
+func (a *App) GetAppVersion() string {
+	return appVersion
+}
+
 // startup 由 Wails 在 DOM 就绪前调用，注入 context 并接通事件发射器。
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx

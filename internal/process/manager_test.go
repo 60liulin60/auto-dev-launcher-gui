@@ -268,6 +268,11 @@ func TestNodeProjectUsesInjectedRuntime(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(pkg), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// 本测试只验证运行时注入；放一个空 node_modules 跳过依赖安装，
+	// 避免 npm 在 Windows 上短暂占用临时目录导致 t.TempDir 清理失败。
+	if err := os.Mkdir(filepath.Join(dir, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, ".nvmrc"), []byte(target.Version+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

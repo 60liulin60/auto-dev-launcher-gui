@@ -315,7 +315,7 @@ func (m *Manager) StartServer(opts StartOptions) (types.ServerProcess, error) {
 
 		// 运行时列表在应用启动时缓存；用户可能在运行期间卸载了版本。
 		// 注入前重新校验目录，过期时重新探测并解析一次。
-		if runtimeDir != "" && !noderuntime.Runtime{Dir: runtimeDir}.Usable() {
+		if runtimeDir != "" && !(noderuntime.Runtime{Dir: runtimeDir}).Usable() {
 			m.reloadRuntimes()
 			resolution, spec, err = m.ResolveRuntime(projectPath, cfg.Runtime, opts.RuntimeOverride)
 			if err != nil {
@@ -323,7 +323,7 @@ func (m *Manager) StartServer(opts StartOptions) (types.ServerProcess, error) {
 			}
 			runtimeDir = resolution.Runtime.Dir
 			runVersion, runSource, runNote = describeRuntime(resolution, spec)
-			if runtimeDir != "" && !noderuntime.Runtime{Dir: runtimeDir}.Usable() {
+			if runtimeDir != "" && !(noderuntime.Runtime{Dir: runtimeDir}).Usable() {
 				return types.ServerProcess{}, fmt.Errorf("运行时目录不可用: %s", runtimeDir)
 			}
 		}

@@ -26,28 +26,24 @@ const ModalDialog: React.FC<ModalDialogProps> = ({
 }) => {
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null)
 
-  // Focus the primary action so Enter/Escape work without an extra click.
+  // Focus the primary action on open (and whenever a queued dialog replaces this one).
   useEffect(() => {
     confirmButtonRef.current?.focus()
-  }, [])
+  }, [kind, title, message])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
         onCancel()
-        return
       }
-
-      if (event.key === 'Enter') {
-        event.preventDefault()
-        onConfirm()
-      }
+      // Enter is left to the focused button's native activation: confirming on
+      // Enter regardless of focus made "Cancel" trigger the destructive action.
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onCancel, onConfirm])
+  }, [onCancel])
 
   // Only dismiss when the backdrop itself is clicked, not the dialog body.
   const handleOverlayClick = useCallback(

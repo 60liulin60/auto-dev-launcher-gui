@@ -13,7 +13,7 @@
 | `getServerStatus(id)` | `GetServerStatus` | 查询状态 |
 | `getServerProcess(id)` | `GetServerProcess` | 状态 + 退出码 + 耗时 + 运行时 |
 | `listRuntimes()` | `ListRuntimes` | 本机可选 Node 运行时（含"系统默认"） |
-| `previewRuntime(path, override?)` | `PreviewRuntime` | 解析该项目将用的运行时 |
+| `previewRuntime(path, override?, configVersion?)` | `PreviewRuntime` | 解析该项目将用的运行时（configVersion 为历史配置回退） |
 | `installRuntime(version)` | `InstallRuntime` | 调 nvm-windows 安装版本 |
 | `selectScriptFile()` | `SelectScriptFile` | 选 .bat/.cmd 对话框 |
 | `loadScriptConfig(scriptPath)` | `LoadScriptConfig` | 由脚本文件生成项目配置 |

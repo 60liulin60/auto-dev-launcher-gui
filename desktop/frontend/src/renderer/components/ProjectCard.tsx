@@ -54,6 +54,7 @@ const ProjectCard: React.FC<ProjectCardProps> = memo(({
   const { preview, isInstalling, install } = useRuntimePreview(
     project.path,
     project.runtimeOverride ?? '',
+    project.config.runtime ?? '',
     !isScriptProject
   )
 

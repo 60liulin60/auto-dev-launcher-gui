@@ -9,8 +9,8 @@ import { useDialog } from '../contexts/DialogContext'
  */
 const PREVIEW_CACHE = new Map<string, RuntimePreview>()
 
-function cacheKey(projectPath: string, runtimeOverride: string): string {
-  return `${projectPath}\u0000${runtimeOverride}`
+function cacheKey(projectPath: string, runtimeOverride: string, configVersion: string): string {
+  return `${projectPath}\u0000${runtimeOverride}\u0000${configVersion}`
 }
 
 export interface RuntimePreviewState {
@@ -27,6 +27,7 @@ export interface RuntimePreviewState {
 export function useRuntimePreview(
   projectPath: string | null,
   runtimeOverride = '',
+  configVersion = '',
   enabled = true
 ): RuntimePreviewState {
   const { showAlert } = useDialog()
@@ -45,8 +46,8 @@ export function useRuntimePreview(
     setIsLoading(true)
 
     try {
-      const next = await desktop.previewRuntime(projectPath, runtimeOverride)
-      PREVIEW_CACHE.set(cacheKey(projectPath, runtimeOverride), next)
+      const next = await desktop.previewRuntime(projectPath, runtimeOverride, configVersion)
+      PREVIEW_CACHE.set(cacheKey(projectPath, runtimeOverride, configVersion), next)
       if (requestIdRef.current === requestId) {
         setPreview(next)
       }
@@ -62,7 +63,7 @@ export function useRuntimePreview(
         setIsLoading(false)
       }
     }
-  }, [enabled, projectPath, runtimeOverride])
+  }, [configVersion, enabled, projectPath, runtimeOverride])
 
   useEffect(() => {
     if (!enabled || !projectPath) {
@@ -72,9 +73,9 @@ export function useRuntimePreview(
       return
     }
 
-    setPreview(PREVIEW_CACHE.get(cacheKey(projectPath, runtimeOverride)) ?? null)
+    setPreview(PREVIEW_CACHE.get(cacheKey(projectPath, runtimeOverride, configVersion)) ?? null)
     void fetchPreview()
-  }, [enabled, fetchPreview, projectPath, runtimeOverride])
+  }, [configVersion, enabled, fetchPreview, projectPath, runtimeOverride])
 
   const refresh = useCallback(async (): Promise<void> => {
     await fetchPreview()

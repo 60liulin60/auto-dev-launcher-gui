@@ -2,6 +2,9 @@ import React, { memo } from 'react'
 import { ProjectListProps, ServerState } from '../types'
 import ProjectCard from './ProjectCard'
 
+// 复用一个稳定的 idle 对象：每次渲染都新建 { status:'idle', output:[] } 会击穿 ProjectCard 的 memo。
+const IDLE_SERVER_STATE: ServerState = { status: 'idle', output: [] }
+
 const ProjectList: React.FC<ProjectListProps> = memo(({
   projects,
   serverStates,
@@ -14,7 +17,7 @@ const ProjectList: React.FC<ProjectListProps> = memo(({
   onProjectRemove
 }) => {
   const getServerState = (projectId: string): ServerState => {
-    return serverStates.get(projectId) || { status: 'idle', output: [] }
+    return serverStates.get(projectId) || IDLE_SERVER_STATE
   }
 
   if (projects.length === 0) {

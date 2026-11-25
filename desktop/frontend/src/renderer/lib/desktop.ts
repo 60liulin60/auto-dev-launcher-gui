@@ -221,7 +221,11 @@ export const desktop = {
     return app.ListRuntimes()
   },
 
-  previewRuntime(projectPath: string, runtimeOverride = ''): Promise<RuntimePreview> {
+  previewRuntime(
+    projectPath: string,
+    runtimeOverride = '',
+    configVersion = ''
+  ): Promise<RuntimePreview> {
     const app = getApp()
     if (!app) {
       return Promise.resolve({
@@ -232,7 +236,7 @@ export const desktop = {
       })
     }
 
-    return app.PreviewRuntime(projectPath, runtimeOverride)
+    return app.PreviewRuntime(projectPath, runtimeOverride, configVersion)
   },
 
   installRuntime(version: string): Promise<void> {

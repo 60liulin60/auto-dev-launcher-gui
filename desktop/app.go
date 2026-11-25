@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/60liulin60/auto-dev-launcher-gui/refactor/internal/config"
@@ -26,6 +27,9 @@ type App struct {
 	ctx     context.Context
 	storage *storage.Manager
 	process *process.Manager
+	// settingsMu 串行化“应用注册表 + 读取真实状态 + 保存”这一整段设置写入，
+	// 避免两个并发 SaveSettings 相互覆盖。历史读写由 storage 的事务方法保护。
+	settingsMu sync.Mutex
 	// exitRequested 标记用户已确认退出，避免 close-to-tray 拦截真正的退出。
 	exitRequested atomic.Bool
 }
@@ -158,6 +162,13 @@ func (a *App) ValidateConfig(cfg types.DevConfig) types.ValidationResult {
 
 // StartServer 启动项目（必要时先装依赖），runtimeOverride 为本机历史里保存的版本覆盖值。
 func (a *App) StartServer(projectID, projectPath string, cfg types.DevConfig, runtimeOverride string) (types.ServerProcess, error) {
+	// 与 PreviewRuntime 对齐：启动时重新读取 dev-config.json 的 runtime；
+	// 文件不可读或未声明时沿用历史快照。
+	if cfg.Kind.Normalize() == types.KindNode {
+		if diskCfg, err := config.LoadProjectConfig(projectPath); err == nil && strings.TrimSpace(diskCfg.Runtime) != "" {
+			cfg.Runtime = diskCfg.Runtime
+		}
+	}
 	return a.process.StartServer(process.StartOptions{
 		ProjectID:       projectID,
 		ProjectPath:     projectPath,
@@ -206,16 +217,17 @@ func (a *App) ListRuntimes() []types.RuntimeOption {
 
 // PreviewRuntime 解析某项目将使用的运行时，供启动前显示。
 // 版本未安装时不报错，而是返回 Missing=true 让界面提供"安装"入口。
-func (a *App) PreviewRuntime(projectPath, runtimeOverride string) types.RuntimePreview {
+func (a *App) PreviewRuntime(projectPath, runtimeOverride, historyConfigVersion string) types.RuntimePreview {
 	path := strings.TrimSpace(projectPath)
 	if path == "" {
 		return types.RuntimePreview{Source: "系统默认", Label: "系统默认"}
 	}
 
-	// dev-config.json 里的 runtime 优先级最高，先从配置里取出来
-	configVersion := ""
+	// dev-config.json 里的 runtime 优先级最高；文件不可读/未声明时回退到历史快照，
+	// 与 StartServer 的解析来源保持一致。
+	configVersion := strings.TrimSpace(historyConfigVersion)
 	if !config.IsScriptPath(path) {
-		if cfg, err := config.LoadProjectConfig(path); err == nil {
+		if cfg, err := config.LoadProjectConfig(path); err == nil && strings.TrimSpace(cfg.Runtime) != "" {
 			configVersion = cfg.Runtime
 		}
 	}
@@ -302,48 +314,37 @@ func (a *App) LoadHistory() ([]types.ProjectHistoryEntry, error) {
 // AddToHistory 新增或更新历史记录：按 id 去重并刷新最后启动时间。
 // 复刻现网 Tauri add_to_history 命令的语义。
 func (a *App) AddToHistory(entry types.ProjectHistoryEntry) error {
-	history, err := a.storage.LoadProjectHistory()
-	if err != nil {
-		return err
-	}
-
 	entry.LastLaunched = currentTimestampMS()
 
-	replaced := false
-	for i := range history {
-		if history[i].ID == entry.ID {
-			history[i] = entry
-			replaced = true
-			break
+	return a.storage.UpdateProjectHistory(func(history []types.ProjectHistoryEntry) ([]types.ProjectHistoryEntry, error) {
+		for i := range history {
+			if history[i].ID == entry.ID {
+				history[i] = entry
+				return history, nil
+			}
 		}
-	}
-	if !replaced {
-		history = append(history, entry)
-	}
-
-	return a.storage.SaveProjectHistory(history)
+		return append(history, entry), nil
+	})
 }
 
 // RemoveFromHistory 按 id 删除历史记录。
 func (a *App) RemoveFromHistory(projectID string) error {
-	history, err := a.storage.LoadProjectHistory()
-	if err != nil {
-		return err
-	}
-
-	filtered := make([]types.ProjectHistoryEntry, 0, len(history))
-	for _, entry := range history {
-		if entry.ID != projectID {
-			filtered = append(filtered, entry)
+	return a.storage.UpdateProjectHistory(func(history []types.ProjectHistoryEntry) ([]types.ProjectHistoryEntry, error) {
+		filtered := make([]types.ProjectHistoryEntry, 0, len(history))
+		for _, entry := range history {
+			if entry.ID != projectID {
+				filtered = append(filtered, entry)
+			}
 		}
-	}
-
-	return a.storage.SaveProjectHistory(filtered)
+		return filtered, nil
+	})
 }
 
-// ClearHistory 清空历史记录。
+// ClearHistory 清空历史记录。走事务更新，与并发 Add/Remove 串行。
 func (a *App) ClearHistory() error {
-	return a.storage.SaveProjectHistory([]types.ProjectHistoryEntry{})
+	return a.storage.UpdateProjectHistory(func([]types.ProjectHistoryEntry) ([]types.ProjectHistoryEntry, error) {
+		return []types.ProjectHistoryEntry{}, nil
+	})
 }
 
 // OpenInExplorer 在系统资源管理器或浏览器中打开路径/URL。
@@ -370,6 +371,9 @@ func (a *App) LoadSettings() (types.AppSettings, error) {
 
 // SaveSettings 保存设置并应用自启，回写真实注册表状态后返回。
 func (a *App) SaveSettings(settings types.AppSettings) (types.AppSettings, error) {
+	a.settingsMu.Lock()
+	defer a.settingsMu.Unlock()
+
 	if err := platform.SetLaunchOnStartup(settings.LaunchOnStartup); err != nil {
 		return types.AppSettings{}, err
 	}
@@ -405,5 +409,6 @@ func (a *App) Confirm(message string, title string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return result == "是", nil
+	// Wails 在 Windows 上返回 "Yes"/"No"，不会回传传入的中文按钮文案。
+	return result == "是" || strings.EqualFold(strings.TrimSpace(result), "Yes"), nil
 }

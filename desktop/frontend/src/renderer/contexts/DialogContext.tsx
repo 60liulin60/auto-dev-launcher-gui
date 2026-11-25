@@ -28,6 +28,11 @@ interface DialogState {
   tone: DialogTone
 }
 
+interface DialogRequest {
+  state: DialogState
+  resolve: (confirmed: boolean) => void
+}
+
 interface DialogContextType {
   showAlert: (message: string, options?: DialogOptions) => Promise<void>
   showConfirm: (message: string, options?: DialogOptions) => Promise<boolean>
@@ -47,43 +52,72 @@ interface DialogProviderProps {
 export const DialogProvider: React.FC<DialogProviderProps> = ({ children }) => {
   const [dialog, setDialog] = useState<DialogState | null>(null)
 
-  // Resolve the pending promise when the user closes the dialog.
-  const resolverRef = useRef<((confirmed: boolean) => void) | null>(null)
+  // 每个弹窗保留自己的 resolver，并串行显示；后开的弹窗不能覆盖前一个的 Promise。
+  const currentRef = useRef<DialogRequest | null>(null)
+  const queueRef = useRef<DialogRequest[]>([])
+
+  const openNext = useCallback(() => {
+    const next = queueRef.current.shift()
+    if (!next) {
+      setDialog(null)
+      return
+    }
+    currentRef.current = next
+    setDialog(next.state)
+  }, [])
+
+  const enqueue = useCallback(
+    (state: DialogState, resolve: (confirmed: boolean) => void) => {
+      const request: DialogRequest = { state, resolve }
+      if (currentRef.current) {
+        queueRef.current.push(request)
+        return
+      }
+      currentRef.current = request
+      setDialog(state)
+    },
+    []
+  )
 
   const closeWith = useCallback((confirmed: boolean) => {
-    const resolver = resolverRef.current
-    resolverRef.current = null
+    const current = currentRef.current
+    currentRef.current = null
     setDialog(null)
-    resolver?.(confirmed)
-  }, [])
+    current?.resolve(confirmed)
+    openNext()
+  }, [openNext])
 
   const showAlert = useCallback((message: string, options?: DialogOptions) => {
     return new Promise<void>((resolve) => {
-      resolverRef.current = () => resolve()
-      setDialog({
-        kind: 'alert',
-        message,
-        title: options?.title ?? DEFAULT_ALERT_TITLE,
-        confirmText: options?.confirmText ?? '知道了',
-        cancelText: options?.cancelText ?? DEFAULT_CANCEL_TEXT,
-        tone: options?.tone ?? 'default',
-      })
+      enqueue(
+        {
+          kind: 'alert',
+          message,
+          title: options?.title ?? DEFAULT_ALERT_TITLE,
+          confirmText: options?.confirmText ?? '知道了',
+          cancelText: options?.cancelText ?? DEFAULT_CANCEL_TEXT,
+          tone: options?.tone ?? 'default',
+        },
+        () => resolve()
+      )
     })
-  }, [])
+  }, [enqueue])
 
   const showConfirm = useCallback((message: string, options?: DialogOptions) => {
     return new Promise<boolean>((resolve) => {
-      resolverRef.current = (confirmed) => resolve(confirmed)
-      setDialog({
-        kind: 'confirm',
-        message,
-        title: options?.title ?? DEFAULT_CONFIRM_TITLE,
-        confirmText: options?.confirmText ?? DEFAULT_CONFIRM_TEXT,
-        cancelText: options?.cancelText ?? DEFAULT_CANCEL_TEXT,
-        tone: options?.tone ?? 'default',
-      })
+      enqueue(
+        {
+          kind: 'confirm',
+          message,
+          title: options?.title ?? DEFAULT_CONFIRM_TITLE,
+          confirmText: options?.confirmText ?? DEFAULT_CONFIRM_TEXT,
+          cancelText: options?.cancelText ?? DEFAULT_CANCEL_TEXT,
+          tone: options?.tone ?? 'default',
+        },
+        resolve
+      )
     })
-  }, [])
+  }, [enqueue])
 
   const contextValue = useMemo<DialogContextType>(
     () => ({ showAlert, showConfirm }),

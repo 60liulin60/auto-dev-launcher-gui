@@ -225,7 +225,7 @@ describe('desktop', () => {
     await expect(desktop.listRuntimes()).resolves.toHaveLength(1)
     const preview = await desktop.previewRuntime('E:/workspace/project', '')
     expect(preview.missing).toBe(true)
-    expect(previewRuntime).toHaveBeenCalledWith('E:/workspace/project', '')
+    expect(previewRuntime).toHaveBeenCalledWith('E:/workspace/project', '', '')
 
     await desktop.installRuntime('18.20.4')
     expect(installRuntime).toHaveBeenCalledWith('18.20.4')

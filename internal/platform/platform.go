@@ -124,18 +124,6 @@ func IsLaunchOnStartupEnabled() (bool, error) {
 	return err == nil, nil
 }
 
-func openURL(url string) error {
-	if runtime.GOOS == "windows" {
-		cmd := exec.Command("cmd", "/C", "start", "", url)
-		hideWindow(cmd)
-		return cmd.Start()
-	}
-	opener := "xdg-open"
-	if runtime.GOOS == "darwin" {
-		opener = "open"
-	}
-	return exec.Command(opener, url).Start()
-}
 
 func openPath(path string) error {
 	if runtime.GOOS == "windows" {

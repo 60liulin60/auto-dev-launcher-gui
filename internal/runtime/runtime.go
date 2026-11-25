@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,6 +43,32 @@ func (r Runtime) Display() string {
 		return "系统默认"
 	}
 	return r.Version
+}
+
+// Usable 判断运行时目录里是否仍有可执行的 node。
+// 应用运行期间用户可能用 nvm 卸载版本，启动时缓存下来的列表会过期。
+func (r Runtime) Usable() bool {
+	dir := strings.TrimSpace(r.Dir)
+	if dir == "" {
+		return false
+	}
+	nodeName := "node"
+	if goruntime.GOOS == "windows" {
+		nodeName = "node.exe"
+	}
+	info, err := os.Stat(filepath.Join(dir, nodeName))
+	return err == nil && !info.IsDir()
+}
+
+// FilterUsable 返回目录仍然有效的运行时列表。
+func FilterUsable(list []Runtime) []Runtime {
+	filtered := make([]Runtime, 0, len(list))
+	for _, item := range list {
+		if item.Usable() {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 // Spec 项目目录里写下的原始版本声明

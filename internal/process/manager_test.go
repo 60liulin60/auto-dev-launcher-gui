@@ -172,6 +172,28 @@ func TestScriptProjectCompletesWithExitCode(t *testing.T) {
 	}
 }
 
+func TestScriptProjectResolvesRelativeCommand(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("脚本项目依赖 cmd /C，仅在 Windows 上验证")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "run.bat"), []byte("@echo off\r\nexit /b 0\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := types.DevConfig{Kind: types.KindScript, Command: "run.bat", Cwd: dir}
+	m := New(nil)
+	if _, err := m.StartServer(StartOptions{ProjectID: "script-folder", ProjectPath: dir, Config: cfg}); err != nil {
+		t.Fatalf("启动脚本失败: %v", err)
+	}
+
+	info := waitForStatus(t, m, "script-folder", types.ServerStatusCompleted)
+	if info.ExitCode == nil || *info.ExitCode != 0 {
+		t.Fatalf("退出码应为 0，实际 %+v", info.ExitCode)
+	}
+}
+
 func TestScriptProjectNonZeroExitIsError(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("脚本项目依赖 cmd /C，仅在 Windows 上验证")
@@ -228,7 +250,12 @@ func TestNodeProjectUsesInjectedRuntime(t *testing.T) {
 		t.Skip("运行时注入依赖 cmd.exe 与 Windows 版 nvm")
 	}
 	available, err := noderuntime.Discover(os.Getenv("NVM_HOME"))
-	if err != nil || len(available) < 2 {
+	if err != nil {
+		t.Skip("本机没有可对比的多个 nvm 版本，跳过")
+	}
+	// SetRuntimes 会过滤掉目录不完整的版本；这里先过滤，避免测试选中已被过滤的版本。
+	available = noderuntime.FilterUsable(available)
+	if len(available) < 2 {
 		t.Skip("本机没有可对比的多个 nvm 版本，跳过")
 	}
 

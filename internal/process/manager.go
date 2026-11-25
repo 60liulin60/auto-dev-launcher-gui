@@ -65,21 +65,96 @@ type StartOptions struct {
 	RuntimeOverride string
 }
 
+// errStartCanceled 表示启动过程中被用户停止（不是启动失败）。
+var errStartCanceled = errors.New("start canceled")
+
 // managedProcess 单个项目的进程运行态
 type managedProcess struct {
-	pid            uint32
-	cmd            *exec.Cmd
-	startTimeMS    uint64
-	infoMu         sync.Mutex
-	info           types.ServerProcess
-	outputMu       sync.Mutex
-	outputBuffer   string
+	cmdMu       sync.Mutex
+	cmd         *exec.Cmd
+	pid         uint32
+	startTimeMS uint64
+	infoMu      sync.Mutex
+	info        types.ServerProcess
+	outputMu    sync.Mutex
+	outputBuffer string
 	flushScheduled atomic.Bool
 	urlDetected    atomic.Bool
 	// killOnce 保证只杀一次
 	killOnce sync.Once
 	// stopping 标记进程正在被主动停止；置位后读管道报错视为正常终止，不上报
 	stopping atomic.Bool
+	// stopRequested 在安装/启动任一阶段被停止时置位；stopCh 用于打断安装等待
+	stopRequested atomic.Bool
+	stopOnce      sync.Once
+	stopCh        chan struct{}
+	// installing/installCmd/installDone 让 StopServer 在依赖安装阶段也能同步取消
+	installing      atomic.Bool
+	installMu       sync.Mutex
+	installCmd      *exec.Cmd
+	installDone     chan struct{}
+	installDoneOnce sync.Once
+	// exited 在 cmd.Wait 返回后置位，避免启动守护协程无锁读 ProcessState
+	exited  atomic.Bool
+	readers sync.WaitGroup
+}
+
+// requestStop 幂等地置位停止标志并唤醒安装阶段的等待。
+func (mp *managedProcess) requestStop() {
+	mp.stopping.Store(true)
+	mp.stopRequested.Store(true)
+	mp.stopOnce.Do(func() {
+		if mp.stopCh != nil {
+			close(mp.stopCh)
+		}
+	})
+}
+
+func (mp *managedProcess) setCommand(cmd *exec.Cmd, pid uint32) {
+	mp.cmdMu.Lock()
+	mp.cmd = cmd
+	mp.pid = pid
+	mp.cmdMu.Unlock()
+}
+
+func (mp *managedProcess) command() (*exec.Cmd, uint32) {
+	mp.cmdMu.Lock()
+	defer mp.cmdMu.Unlock()
+	return mp.cmd, mp.pid
+}
+
+func (mp *managedProcess) setInstallCommand(cmd *exec.Cmd) {
+	mp.installMu.Lock()
+	mp.installCmd = cmd
+	mp.installMu.Unlock()
+}
+
+func (mp *managedProcess) installCommand() *exec.Cmd {
+	mp.installMu.Lock()
+	defer mp.installMu.Unlock()
+	return mp.installCmd
+}
+
+func (mp *managedProcess) markInstallDone() {
+	mp.installDoneOnce.Do(func() {
+		if mp.installDone != nil {
+			close(mp.installDone)
+		}
+	})
+}
+
+// waitReaders 有上限地等待 stdout/stderr 读取协程排空管道，
+// 避免孙进程长期占用写端时把退出监控永远挂住。
+func (mp *managedProcess) waitReaders(timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		mp.readers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
 }
 
 // isTerminal 判断状态是否已终结（无需再杀进程）
@@ -128,7 +203,7 @@ func (m *Manager) SetEmitter(emitter Emitter) {
 func (m *Manager) SetRuntimes(available []noderuntime.Runtime, system noderuntime.Runtime) {
 	m.runtimeMu.Lock()
 	defer m.runtimeMu.Unlock()
-	m.available = available
+	m.available = noderuntime.FilterUsable(available)
 	m.systemRuntime = system
 	m.runtimesReady = true
 }
@@ -152,6 +227,7 @@ func (m *Manager) runtimeState() ([]noderuntime.Runtime, noderuntime.Runtime) {
 	}
 
 	available, _ = noderuntime.Discover(os.Getenv("NVM_HOME"))
+	available = noderuntime.FilterUsable(available)
 	system = noderuntime.System()
 
 	m.runtimeMu.Lock()
@@ -160,6 +236,12 @@ func (m *Manager) runtimeState() ([]noderuntime.Runtime, noderuntime.Runtime) {
 	m.runtimesReady = true
 	m.runtimeMu.Unlock()
 	return available, system
+}
+
+// reloadRuntimes 重新探测运行时，用于处理应用运行期间版本被卸载的情况。
+func (m *Manager) reloadRuntimes() {
+	available, _ := noderuntime.Discover(os.Getenv("NVM_HOME"))
+	m.SetRuntimes(available, noderuntime.System())
 }
 
 // ResolveRuntime 解析某个项目将使用的运行时（不启动进程，供界面预览）
@@ -177,7 +259,10 @@ func (m *Manager) ResolveRuntime(projectPath, configVersion, historyVersion stri
 	return resolution, spec, err
 }
 
-// StartServer 启动项目（必要时先装依赖），返回启动瞬间的进程信息
+// StartServer 启动项目（必要时先装依赖），返回启动瞬间的进程信息。
+//
+// 进程占位会在依赖安装前登记到 m.processes，这样安装期间的 StopServer /
+// StopAllServers 能取消安装，而不是返回“project is not running”。
 func (m *Manager) StartServer(opts StartOptions) (types.ServerProcess, error) {
 	cfg := opts.Config
 	kind := cfg.Kind.Normalize()
@@ -187,7 +272,9 @@ func (m *Manager) StartServer(opts StartOptions) (types.ServerProcess, error) {
 		return types.ServerProcess{}, err
 	}
 	if kind == types.KindScript {
-		if err := config.ValidateScriptTarget(projectPath); err != nil {
+		// 文件夹方式添加的脚本项目，ProjectPath 是目录，真正的脚本在 cfg.Command 里。
+		projectPath, err = resolveScriptPath(projectPath, cfg.Command)
+		if err != nil {
 			return types.ServerProcess{}, err
 		}
 	} else if err := config.ValidateProjectDirectory(projectPath); err != nil {
@@ -209,15 +296,6 @@ func (m *Manager) StartServer(opts StartOptions) (types.ServerProcess, error) {
 		return types.ServerProcess{}, err
 	}
 
-	if existing := m.getProcess(opts.ProjectID); existing != nil {
-		existing.infoMu.Lock()
-		st := existing.info.Status
-		existing.infoMu.Unlock()
-		if st == types.ServerStatusStarting || st == types.ServerStatusRunning {
-			return types.ServerProcess{}, fmt.Errorf("project is already running")
-		}
-	}
-
 	// 运行时解析只对 node 项目做：版本没装要报错，绝不静默回退
 	var (
 		resolution noderuntime.Resolution
@@ -234,47 +312,30 @@ func (m *Manager) StartServer(opts StartOptions) (types.ServerProcess, error) {
 		}
 		runtimeDir = resolution.Runtime.Dir
 		runVersion, runSource, runNote = describeRuntime(resolution, spec)
-	}
 
-	if kind == types.KindNode {
-		if err := m.installDependenciesIfNeeded(opts.ProjectID, projectPath, runtimeDir); err != nil {
-			return types.ServerProcess{}, err
+		// 运行时列表在应用启动时缓存；用户可能在运行期间卸载了版本。
+		// 注入前重新校验目录，过期时重新探测并解析一次。
+		if runtimeDir != "" && !noderuntime.Runtime{Dir: runtimeDir}.Usable() {
+			m.reloadRuntimes()
+			resolution, spec, err = m.ResolveRuntime(projectPath, cfg.Runtime, opts.RuntimeOverride)
+			if err != nil {
+				return types.ServerProcess{}, err
+			}
+			runtimeDir = resolution.Runtime.Dir
+			runVersion, runSource, runNote = describeRuntime(resolution, spec)
+			if runtimeDir != "" && !noderuntime.Runtime{Dir: runtimeDir}.Usable() {
+				return types.ServerProcess{}, fmt.Errorf("运行时目录不可用: %s", runtimeDir)
+			}
 		}
 	}
 
-	rawCommand, err := buildCommand(kind, projectPath, cfg)
-	if err != nil {
-		return types.ServerProcess{}, err
-	}
-
-	cmd := createShellCommand(rawCommand)
-	cmd.Dir = workDir
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	m.applyEnvironment(cmd, opts.ProjectID, cfg.Env, runtimeDir)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return types.ServerProcess{}, fmt.Errorf("failed to start server process: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return types.ServerProcess{}, fmt.Errorf("failed to start server process: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return types.ServerProcess{}, fmt.Errorf("failed to start server process: %w", err)
-	}
-
-	pid := uint32(cmd.Process.Pid)
 	startedAt := currentTimestampMS()
 	mp := &managedProcess{
-		pid:         pid,
-		cmd:         cmd,
 		startTimeMS: startedAt,
+		stopCh:      make(chan struct{}),
+		installDone: make(chan struct{}),
 		info: types.ServerProcess{
 			ProjectID:     opts.ProjectID,
-			PID:           pid,
 			Status:        types.ServerStatusStarting,
 			StartTime:     startedAt,
 			Runtime:       runVersion,
@@ -283,23 +344,158 @@ func (m *Manager) StartServer(opts StartOptions) (types.ServerProcess, error) {
 		},
 	}
 
+	// 检查并登记占位进程必须原子，否则两个并发 StartServer 会同时通过检查。
 	m.mu.Lock()
+	if existing := m.processes[opts.ProjectID]; existing != nil {
+		existing.infoMu.Lock()
+		st := existing.info.Status
+		existing.infoMu.Unlock()
+		if st == types.ServerStatusStarting || st == types.ServerStatusRunning {
+			m.mu.Unlock()
+			return types.ServerProcess{}, fmt.Errorf("project is already running")
+		}
+	}
 	m.processes[opts.ProjectID] = mp
 	m.mu.Unlock()
+
+	if kind == types.KindNode {
+		if err := m.installDependenciesIfNeeded(mp, projectPath, runtimeDir); err != nil {
+			if errors.Is(err, errStartCanceled) || mp.stopRequested.Load() {
+				m.finishStart(mp, types.ServerStatusStopped, nil)
+				return m.serverProcessSnapshot(mp), nil
+			}
+			m.finishStart(mp, types.ServerStatusError, nil)
+			return types.ServerProcess{}, err
+		}
+	}
+	if mp.stopRequested.Load() {
+		m.finishStart(mp, types.ServerStatusStopped, nil)
+		return m.serverProcessSnapshot(mp), nil
+	}
+
+	rawCommand, err := buildCommand(kind, projectPath, cfg)
+	if err != nil {
+		return m.abortStart(mp, err)
+	}
+
+	cmd := createShellCommand(rawCommand)
+	cmd.Dir = workDir
+	m.applyEnvironment(cmd, opts.ProjectID, cfg.Env, runtimeDir)
+
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		return m.abortStart(mp, fmt.Errorf("failed to start server process: %w", err))
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		return m.abortStart(mp, fmt.Errorf("failed to start server process: %w", err))
+	}
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
+
+	if err := cmd.Start(); err != nil {
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		_ = stderrR.Close()
+		_ = stderrW.Close()
+		return m.abortStart(mp, fmt.Errorf("failed to start server process: %w", err))
+	}
+	// 父进程关闭写端；子进程持有自己的写端。这样 cmd.Wait 不会提前关闭读端，
+	// 读取协程能把管道里剩余的输出（常是真正的报错行）读完。
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+
+	pid := uint32(cmd.Process.Pid)
+	mp.setCommand(cmd, pid)
+	mp.infoMu.Lock()
+	mp.info.PID = pid
+	mp.info.StartTime = currentTimestampMS()
+	mp.startTimeMS = mp.info.StartTime
+	mp.infoMu.Unlock()
+
+	// 启动过程中可能已经被 StopServer 取消（它此时还看不到 cmd）。
+	if mp.stopRequested.Load() {
+		_ = m.killManaged(mp)
+	}
 
 	if runNote != "" {
 		m.emitOutput(opts.ProjectID, "[runtime] "+runNote+"\n")
 	}
 
-	go m.spawnOutputReader(opts.ProjectID, stdout, mp)
-	go m.spawnOutputReader(opts.ProjectID, stderr, mp)
+	mp.readers.Add(2)
+	go func() {
+		defer mp.readers.Done()
+		m.spawnOutputReader(opts.ProjectID, stdoutR, mp)
+	}()
+	go func() {
+		defer mp.readers.Done()
+		m.spawnOutputReader(opts.ProjectID, stderrR, mp)
+	}()
 	go m.spawnStartupGuard(opts.ProjectID, mp)
-	go m.spawnExitMonitor(opts.ProjectID, mp)
+	go m.spawnExitMonitor(opts.ProjectID, mp, cmd)
 
+	return m.serverProcessSnapshot(mp), nil
+}
+
+func (m *Manager) serverProcessSnapshot(mp *managedProcess) types.ServerProcess {
 	mp.infoMu.Lock()
+	defer mp.infoMu.Unlock()
+	return mp.info
+}
+
+// finishStart 写入启动阶段的终态（安装失败/被停止等），并广播状态。
+// 已经是终态时不再覆盖，避免“用户已停止”被后续错误改成 error。
+func (m *Manager) finishStart(mp *managedProcess, status types.ServerStatus, exitCode *int) {
+	mp.infoMu.Lock()
+	if isTerminal(mp.info.Status) {
+		mp.infoMu.Unlock()
+		return
+	}
+	mp.info.Status = status
+	if exitCode != nil {
+		mp.info.ExitCode = exitCode
+	}
+	mp.info.DurationMS = currentTimestampMS() - mp.startTimeMS
 	info := mp.info
 	mp.infoMu.Unlock()
-	return info, nil
+	m.emitStatusChange(info)
+}
+
+// abortStart 处理启动链路上的错误：若用户已经请求停止，返回 stopped 而不是 error。
+func (m *Manager) abortStart(mp *managedProcess, err error) (types.ServerProcess, error) {
+	if mp.stopRequested.Load() {
+		m.finishStart(mp, types.ServerStatusStopped, nil)
+		return m.serverProcessSnapshot(mp), nil
+	}
+	m.finishStart(mp, types.ServerStatusError, nil)
+	return types.ServerProcess{}, err
+}
+
+// resolveScriptPath 解析脚本项目的实际执行文件。
+// ProjectPath 可能来自文件选择（脚本路径），也可能来自目录选择（含 dev-config.json 的目录）；
+// 配置里的 command 是脚本路径，相对路径按项目目录解析。
+func resolveScriptPath(projectPath, command string) (string, error) {
+	target := strings.TrimSpace(command)
+	if target == "" {
+		target = projectPath
+	}
+	if !filepath.IsAbs(target) {
+		base := projectPath
+		if info, err := os.Stat(projectPath); err == nil && !info.IsDir() {
+			base = filepath.Dir(projectPath)
+		}
+		target = filepath.Join(base, target)
+	}
+	target, err := config.SanitizePath(target)
+	if err != nil {
+		return "", err
+	}
+	if err := config.ValidateScriptTarget(target); err != nil {
+		return "", err
+	}
+	return target, nil
 }
 
 // describeRuntime 把解析结果转成界面可读的版本/来源/提示
@@ -330,9 +526,10 @@ func buildCommand(kind types.ProjectKind, projectPath string, cfg types.DevConfi
 	return config.SanitizeCommand(cfg.Command)
 }
 
-// quoteIfNeeded 路径含空格时加引号，避免 cmd /C 拆词
+// quoteIfNeeded 路径含空格或 cmd 元字符时加引号，避免 cmd /C 拆词/二次解析
 func quoteIfNeeded(value string) string {
-	if strings.ContainsAny(value, " \t") && !strings.HasPrefix(value, `"`) {
+	// cmd.exe 会把 & | < > ^ ( ) 当作命令分隔符/控制字符；路径含这些字符时也必须加引号。
+	if strings.ContainsAny(value, " \t&|<>^()") && !strings.HasPrefix(value, `"`) {
 		return `"` + value + `"`
 	}
 	return value
@@ -372,7 +569,8 @@ func prependPath(env []string, dir string) []string {
 	return append(env, "PATH="+dir)
 }
 
-// StopServer 停止指定项目进程（Windows 使用 taskkill /T /F）
+// StopServer 停止指定项目进程（Windows 使用 taskkill /T /F）。
+// 依赖安装阶段进程还没有 cmd，此时取消安装并终止安装进程树。
 func (m *Manager) StopServer(projectID string) error {
 	mp := m.getProcess(projectID)
 	if mp == nil {
@@ -383,6 +581,23 @@ func (m *Manager) StopServer(projectID string) error {
 	mp.infoMu.Unlock()
 	if isTerminal(status) {
 		return nil // 已经结束，无需再杀
+	}
+
+	mp.requestStop()
+	cmd, _ := mp.command()
+	if cmd == nil || cmd.Process == nil {
+		// 安装阶段：requestStop 会关闭 stopCh，install 协程据此杀掉进程树。
+		if mp.installing.Load() {
+			select {
+			case <-mp.installDone:
+			case <-time.After(2 * time.Second):
+			}
+			if installCmd := mp.installCommand(); installCmd != nil && installCmd.Process != nil {
+				_ = killProcessTree(uint32(installCmd.Process.Pid))
+			}
+		}
+		m.finishStart(mp, types.ServerStatusStopped, nil)
+		return nil
 	}
 	return m.killManaged(mp)
 }
@@ -439,21 +654,38 @@ func (m *Manager) killManaged(mp *managedProcess) error {
 	var killErr error
 	mp.killOnce.Do(func() {
 		// 先置位停止标志，使随后关闭管道触发的读错误被识别为正常终止。
-		mp.stopping.Store(true)
-		if runtime.GOOS == "windows" {
-			cmd := exec.Command("taskkill", "/pid", fmt.Sprintf("%d", mp.pid), "/T", "/F")
-			hideWindow(cmd)
-			cmd.Stdout = io.Discard
-			cmd.Stderr = io.Discard
-			if err := cmd.Run(); err == nil {
+		mp.requestStop()
+		cmd, pid := mp.command()
+		if pid != 0 {
+			if err := killProcessTree(pid); err == nil {
 				return
 			}
 		}
-		if mp.cmd != nil && mp.cmd.Process != nil {
-			killErr = mp.cmd.Process.Kill()
+		if cmd != nil && cmd.Process != nil {
+			killErr = cmd.Process.Kill()
 		}
 	})
 	return killErr
+}
+
+// killProcessTree 终止整个进程树。Windows 用 taskkill /T /F，
+// 避免只杀 cmd.exe 而留下 npm/node 子进程继续运行。
+func killProcessTree(pid uint32) error {
+	if pid == 0 {
+		return fmt.Errorf("invalid pid")
+	}
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("taskkill", "/pid", fmt.Sprintf("%d", pid), "/T", "/F")
+		hideWindow(cmd)
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		return cmd.Run()
+	}
+	process, err := os.FindProcess(int(pid))
+	if err != nil {
+		return err
+	}
+	return process.Kill()
 }
 
 func (m *Manager) waitForAllStopped(timeout time.Duration) error {
@@ -486,7 +718,18 @@ func (m *Manager) runningCount() int {
 	return count
 }
 
-func (m *Manager) installDependenciesIfNeeded(projectID, projectPath, runtimeDir string) error {
+func (m *Manager) installDependenciesIfNeeded(mp *managedProcess, projectPath, runtimeDir string) error {
+	projectID := mp.info.ProjectID
+	mp.installing.Store(true)
+	defer func() {
+		mp.installing.Store(false)
+		mp.setInstallCommand(nil)
+		mp.markInstallDone()
+	}()
+
+	if mp.stopRequested.Load() {
+		return errStartCanceled
+	}
 	if !fileExists(filepath.Join(projectPath, "package.json")) || fileExists(filepath.Join(projectPath, "node_modules")) {
 		return nil
 	}
@@ -498,28 +741,46 @@ func (m *Manager) installDependenciesIfNeeded(projectID, projectPath, runtimeDir
 	cmd.Dir = projectPath
 	// 依赖安装使用同一个运行时，否则 esbuild 之类的原生模块会按错误的 ABI 编译
 	m.applyEnvironment(cmd, projectID, nil, runtimeDir)
-	stdout, err := cmd.StdoutPipe()
+
+	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("failed to start dependency install: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
+	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
 		return fmt.Errorf("failed to start dependency install: %w", err)
 	}
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
+
 	if err := cmd.Start(); err != nil {
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		_ = stderrR.Close()
+		_ = stderrW.Close()
 		return fmt.Errorf("failed to start dependency install: %w", err)
 	}
+	// 父进程关闭写端；子进程持有自己的写端，Wait 不会提前关闭读端。
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+	mp.setInstallCommand(cmd)
 
 	var (
 		bufMu          sync.Mutex
 		buffer         string
 		flushScheduled atomic.Bool
 	)
-	readInstall := func(r io.Reader) {
+	readInstall := func(r io.ReadCloser) {
+		defer r.Close()
 		b := make([]byte, 4096)
 		for {
 			n, err := r.Read(b)
 			if n > 0 {
+				if mp.stopRequested.Load() {
+					return
+				}
 				chunk := ansiRegex.ReplaceAllString(string(b[:n]), "")
 				bufMu.Lock()
 				buffer += chunk
@@ -531,22 +792,33 @@ func (m *Manager) installDependenciesIfNeeded(projectID, projectPath, runtimeDir
 			}
 		}
 	}
-	go readInstall(stdout)
-	go readInstall(stderr)
+	go readInstall(stdoutR)
+	go readInstall(stderrR)
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 
+	timeout := time.NewTimer(time.Duration(dependencyInstallTimeoutMS) * time.Millisecond)
+	defer timeout.Stop()
+
 	select {
 	case err := <-done:
+		if mp.stopRequested.Load() {
+			return errStartCanceled
+		}
 		m.flushBufferNow(projectID, &bufMu, &buffer)
 		if err != nil {
 			return fmt.Errorf("dependency install exited with error: %w", err)
 		}
 		m.emitOutput(projectID, "\nDependencies installed. Starting development server...\n\n")
 		return nil
-	case <-time.After(time.Duration(dependencyInstallTimeoutMS) * time.Millisecond):
-		_ = cmd.Process.Kill()
+	case <-mp.stopCh:
+		// 用户停止/退出：杀整个安装进程树，避免 node.exe 继续写 node_modules。
+		_ = killProcessTree(uint32(cmd.Process.Pid))
+		m.flushBufferNow(projectID, &bufMu, &buffer)
+		return errStartCanceled
+	case <-timeout.C:
+		_ = killProcessTree(uint32(cmd.Process.Pid))
 		m.flushBufferNow(projectID, &bufMu, &buffer)
 		return fmt.Errorf("dependency install timed out")
 	}
@@ -585,7 +857,8 @@ func (m *Manager) flushBufferNow(projectID string, mu *sync.Mutex, buffer *strin
 	}
 }
 
-func (m *Manager) spawnOutputReader(projectID string, r io.Reader, mp *managedProcess) {
+func (m *Manager) spawnOutputReader(projectID string, r io.ReadCloser, mp *managedProcess) {
+	defer r.Close()
 	buf := make([]byte, 4096)
 	for {
 		n, err := r.Read(buf)
@@ -616,13 +889,8 @@ func (m *Manager) spawnStartupGuard(projectID string, mp *managedProcess) {
 		return
 	}
 
-	running := true
-	if mp.cmd != nil && mp.cmd.ProcessState != nil && mp.cmd.ProcessState.Exited() {
-		running = false
-	}
-
 	next := types.ServerStatusRunning
-	if !running {
+	if mp.exited.Load() {
 		next = types.ServerStatusError
 	}
 
@@ -638,13 +906,17 @@ func (m *Manager) spawnStartupGuard(projectID string, mp *managedProcess) {
 	m.emitStatusChange(info)
 }
 
-func (m *Manager) spawnExitMonitor(projectID string, mp *managedProcess) {
-	waitErr := mp.cmd.Wait()
+func (m *Manager) spawnExitMonitor(projectID string, mp *managedProcess, cmd *exec.Cmd) {
+	waitErr := cmd.Wait()
+	mp.exited.Store(true)
+
+	// 有上限地等读取协程排空管道：Wait 不再关闭读端，最后一段报错输出不会丢。
+	mp.waitReaders(2 * time.Second)
 	m.flushOutputNow(projectID, mp)
 
 	exitCode := -1
-	if mp.cmd.ProcessState != nil {
-		exitCode = mp.cmd.ProcessState.ExitCode()
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
 	}
 	duration := currentTimestampMS() - mp.startTimeMS
 

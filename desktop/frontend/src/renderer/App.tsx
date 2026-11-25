@@ -101,6 +101,7 @@ function App() {
   const stoppingProjectsRef = useRef<Set<string>>(new Set())
   const pendingOutputsRef = useRef<Map<string, string[]>>(new Map())
   const rafIdRef = useRef<number | null>(null)
+  const flushTimeoutRef = useRef<number | null>(null)
   const appSettingsRef = useRef(appSettings)
 
   // Keep the latest state reachable from async stop/remove flows.
@@ -116,6 +117,11 @@ function App() {
 
   // Batch IPC log bursts into one paint so the renderer stays responsive.
   const flushOutputs = useCallback(() => {
+    if (flushTimeoutRef.current !== null) {
+      window.clearTimeout(flushTimeoutRef.current)
+      flushTimeoutRef.current = null
+    }
+
     if (pendingOutputsRef.current.size === 0) {
       rafIdRef.current = null
       return
@@ -323,6 +329,14 @@ function App() {
       if (rafIdRef.current === null) {
         rafIdRef.current = requestAnimationFrame(flushOutputs)
       }
+
+      // WebView2 在窗口隐藏到托盘时可能暂停 rAF；定时器兜底排空，避免缓冲无限增长。
+      if (flushTimeoutRef.current === null) {
+        flushTimeoutRef.current = window.setTimeout(() => {
+          flushTimeoutRef.current = null
+          flushOutputs()
+        }, 250)
+      }
     }
 
     const handleServerStatusChange = (
@@ -358,6 +372,9 @@ function App() {
 
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current)
+      }
+      if (flushTimeoutRef.current !== null) {
+        window.clearTimeout(flushTimeoutRef.current)
       }
     }
   }, [applyDetectedUrl, applyServerStatusChange, loadHistory, loadSettings, flushOutputs])
@@ -449,7 +466,11 @@ function App() {
       // 启动前确认运行时可用；声明缺失时不静默回退，直接给出安装入口。
       if (!isScriptProject) {
         try {
-          const preview = await desktop.previewRuntime(project.path, runtimeOverride)
+          const preview = await desktop.previewRuntime(
+            project.path,
+            runtimeOverride,
+            project.config.runtime ?? ''
+          )
           if (preview.missing) {
             const requested = preview.requested || preview.version
             updateServerState(project.id, {
@@ -474,16 +495,35 @@ function App() {
         runtimeOverride
       )
 
-      updateServerStateWith(project.id, (currentState) => ({
-        ...currentState,
-        status: process.status,
-        runtime: process.runtime ?? currentState.runtime,
-        runtimeSource: process.runtimeSource ?? currentState.runtimeSource,
-        runtimeNote: process.runtimeNote ?? currentState.runtimeNote,
-        exitCode: process.exitCode,
-        durationMs: process.durationMs,
-        errorMessage: undefined,
-      }))
+      updateServerStateWith(project.id, (currentState) => {
+        const isTerminalStatus =
+          currentState.status === 'completed' ||
+          currentState.status === 'error' ||
+          currentState.status === 'stopped'
+        const keepCurrentStatus =
+          isTerminalStatus ||
+          (currentState.status === 'running' && process.status === 'starting')
+
+        const runtimeFields = {
+          runtime: process.runtime ?? currentState.runtime,
+          runtimeSource: process.runtimeSource ?? currentState.runtimeSource,
+          runtimeNote: process.runtimeNote ?? currentState.runtimeNote,
+        }
+
+        if (keepCurrentStatus) {
+          // 事件可能先于 IPC 响应到达；不要把较新的 running/终态覆盖回 starting。
+          return { ...currentState, ...runtimeFields }
+        }
+
+        return {
+          ...currentState,
+          status: process.status,
+          ...runtimeFields,
+          exitCode: process.exitCode,
+          durationMs: process.durationMs,
+          errorMessage: undefined,
+        }
+      })
       setSelectedProject(project.id)
     } catch (error) {
       const errorMessage = getErrorMessage(error)

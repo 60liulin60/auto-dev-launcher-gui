@@ -32,6 +32,7 @@ const ProjectSettingsDialog: FC<ProjectSettingsDialogProps> = ({
   const { preview, isInstalling, install } = useRuntimePreview(
     isScript ? null : project.path,
     runtimeOverride,
+    project.config.runtime ?? '',
     !isScript
   )
 

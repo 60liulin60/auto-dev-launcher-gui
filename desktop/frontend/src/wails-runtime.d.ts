@@ -45,7 +45,8 @@ export interface GoApp {
   ListRuntimes(): Promise<RuntimeOption[]>
   PreviewRuntime(
     projectPath: string,
-    runtimeOverride: string
+    runtimeOverride: string,
+    configVersion: string
   ): Promise<RuntimePreview>
   InstallRuntime(version: string): Promise<void>
   SelectScriptFile(): Promise<string>
